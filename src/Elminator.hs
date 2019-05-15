@@ -1,92 +1,101 @@
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 
-module Elminator (generateElmDef, ToHType) where
+module Elminator (module Elminator, ElmVersion(..), HType, ToHType, SConfig, DefConfig(..)) where
 
 import Generics.Simple
 import Data.Text as T
-import NeatInterpolation
 import Data.Proxy
 import Language.Haskell.TH
-import qualified Data.List as DL
+import Elminator.Lib
+import qualified Elminator.Elm18 as Elm18
+import qualified Elminator.Elm18 as Elm19
+import qualified Data.Map.Strict as DMS
+import Control.Monad.State.Lazy
+import qualified Control.Monad.State.Strict as SState
+import Control.Monad.Reader
+import Data.Aeson (Options)
 
-generateElmDef :: (ToHType a) => Proxy a -> Q Exp
-generateElmDef p = do
-  let hType = toHType p
-  runIO $ putStrLn $ show $ hType
-  def <- generateElmDef' $ hType
-  pure $ LitE $ StringL def
+-- Primitive instances
+
+
+instance ToHType Char where
+  toHType _ = pure $ HPrimitive (MData "Char" "" "" Nothing) ()
+
+instance ToHType Int where
+  toHType _ = pure $ HPrimitive (MData "Int" "" "" Nothing) ()
+
+instance ToHType Float where
+  toHType _ = pure $ HPrimitive (MData "Float" "" "" Nothing) ()
+
+instance ToHType Bool where
+  toHType _ = pure $ HPrimitive (MData "Bool" "" "" Nothing) ()
+
+-- Common types
+
+instance (ToHType a, ToHType b) => ToHType (Either a b)
+
+instance (ToHType a) => ToHType (Maybe a) where
+  toHType _ = do
+    htype <- (toHType (Proxy :: Proxy a))
+    pure $ HMaybe (MData "Maybe" "" "" Nothing) htype
+
+instance (ToHType a, ToHType b) => ToHType (a, b)
+
+instance ToHType ()
+
+instance (ToHType a) => ToHType [a] where
+  toHType _ = do
+    htype <- (toHType (Proxy :: Proxy a))
+    pure $ case htype  of
+      HPrimitive (MData "Char" _ _ _) _ -> HPrimitive (MData "String" "" "" Nothing) ()
+      hta -> HList hta
+
+addItem
+  :: (ToHType a)
+  => (MData -> DefConfig)
+  -> Proxy a
+  -> SConfig
+addItem dc p = do
+  let hType = SState.evalState (toHType p) (DMS.empty)
+  mdata <- case hType of
+    HType m _ _ -> pure m
+    HPrimitive m _ -> pure m
+    HMaybe md _ -> pure md
+    HList _ -> error "Direct encoding of list type is not supported"
+    HTypeVar _ -> error "Unexpected meta data"
+    HRecursive md -> pure md
+  s <- get
+  put $ case DMS.lookup mdata s of
+    Just x -> DMS.insert mdata ((dc mdata, hType):x) s
+    Nothing -> DMS.insert mdata [(dc mdata, hType)] s
+
+generateElm :: ElmVersion -> SConfig -> Options -> Q Exp
+generateElm ev sc opt = let
+  (_, gc) = runState sc DMS.empty
+  r = do
+    srcs <- mapM generateOne $ DMS.elems gc
+    let
+      srcswh = case ev of
+        Elm18 -> srcs
+        Elm19 -> (Elm19.elmFront:srcs)
+    pure $ toExp $ T.intercalate "" srcswh
+  in runReaderT r gc
   where
-  generateElmDef' :: HType -> Q String
-  generateElmDef' (HTypePrimitive p) = pure ""
-  generateElmDef' (HTypeProduct (HConstructor cname) fields@((HField (Just _) _):_)) = do
-    fieldsSrc <- generateRecordFields fields
-    pure $ T.unpack $ [text|type alias $cname = $cname $fieldsSrc |]
-  generateElmDef' (HTypeProduct (HConstructor cname) fields@((HField Nothing _):_)) = do
-    fieldsSrc <- generateProductFields fields
-    pure $ T.unpack $ [text|type $cname = $cname $fieldsSrc |]
-  generateElmDef' (HTypeWithMeta _ x) = generateElmDef' x
-
-generateRecordFields :: [HField] -> Q Text
-generateRecordFields fields = do
-  pairs <- mapM mapFn fields
-  pure $ let src = intercalate "," pairs in [text| { $src } |]
-  where
-    mapFn :: HField -> Q Text
-    mapFn (HField (Just fname) typ) = do
-      tname <- getTypeName typ
-      pure [text|$fname = $tname|]
-
-generateProductFields :: [HField] -> Q Text
-generateProductFields fields = do
-  pairs <- mapM mapFn fields
-  let src = intercalate " " pairs
-  pure [text| $src|]
-  where
-    mapFn :: HField -> Q Text
-    mapFn (HField Nothing typ) = getTypeName typ
-
-getTypeName :: HType -> Q Text
-getTypeName (HTypeWithMeta (MData x _ _) _) = do
-  mtName <- lookupTypeName $ unpack x
-  case mtName of
-    Just tName -> do
-      info <- reify tName
-      runIO $ putStrLn $ show $ getTypeConstructorArgs info
-      pure x
-    Nothing -> error $ unpack $ [text|Cannot find type with name $x in scope|]
-getTypeName (HTypePrimitive x) = getPrimitiveName x
-getTypeName _ = error "Type name not available"
-
-getPrimitiveName :: HPrimitive -> Q Text
-getPrimitiveName HInt = pure "Int"
-getPrimitiveName HString = pure "String"
-
-data TVCL = TVCL Con Int deriving (Show) -- Location of the type variables location in the constructor
-
-getTypeConstructorArgs :: Info -> [TVCL]
-getTypeConstructorArgs (TyConI d) = getTVCL d
-  where
-    getTVCL :: Dec -> [TVCL]
-    getTVCL (DataD _ name args _ constructors _) = (locateTa constructors . getName) <$> args
+    toExp :: Text -> Exp
+    toExp t = LitE $ StringL $ unpack t
+    generateOne :: [(DefConfig, HType)] -> LibM Text
+    generateOne dcs = do
+      srcs <- mapM generateOne_ $ dcs
+      pure $ T.intercalate "\n\n" srcs
       where
-      getName :: TyVarBndr -> Name
-      getName (PlainTV x) = x
-      getName (KindedTV x _) = x
-      locateTa :: [Con] -> Name -> TVCL
-      locateTa [] n = error "Failed to locate type variable in construct"
-      locateTa (c:cs) n =
-        case lookupTaInConstructor c n of
-          Just x -> TVCL c x
-          Nothing -> locateTa cs n
-        where
-        lookupTaInConstructor :: Con -> Name -> Maybe Int
-        lookupTaInConstructor c n = DL.elemIndex (Just n) (getConstructorArgs c)
-          where
-          getConstructorArgs :: Con -> [Maybe Name]
-          getConstructorArgs (NormalC _ args) = (getTvName . snd) <$> args
-          getConstructorArgs (RecC _ args) = (\(_, _, a) -> getTvName a) <$> args
-          getConstructorArgs _ = error "Unsupported Constructor Type"
-          getTvName :: Type -> Maybe Name
-          getTvName (VarT n) = Just n
+      generateOne_ :: (DefConfig, HType) -> LibM Text
+      generateOne_ (d, h) = do
+        case ev of
+          Elm18 -> Elm18.generateElm d h opt
+          Elm19 -> Elm19.generateElm d h opt

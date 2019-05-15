@@ -1,33 +1,36 @@
 name:                elminator
 version:             0.1.0.0
-github:              "githubuser/elminator"
+git:                 "https://github.com/sras/elminator.git"
 license:             BSD3
-author:              "Author name here"
-maintainer:          "example@example.com"
-copyright:           "2019 Author name here"
+author:              "Sandeep.C.R"
+maintainer:          "sandeepcr2@protonmail.com"
+copyright:           "2019 Sandeep.C.R"
 
 extra-source-files:
 - README.md
 - ChangeLog.md
 
-# Metadata used when publishing your package
-# synopsis:            Short description of your package
-# category:            Web
+ghc-options: -Wall
 
-# To avoid duplicated efforts in documentation and dealing with the
-# complications of embedding Haddock markup inside cabal files, it is
-# common to point users to the README.md file.
-description:         Please see the README on GitHub at <https://github.com/githubuser/elminator#readme>
+description:         Please see the README on GitHub at <https://github.com/sras/elminator#readme>
 
 dependencies:
 - base >= 4.7 && < 5
-- simple-generics
 - template-haskell
+- containers
 - text
-- neat-interpolation
+- mtl
+- aeson
 
 library:
   source-dirs: src
+  exposed-modules:
+    - Elminator
+  other-modules:
+    - Generics.Simple
+    - Elminator.Lib
+    - Elminator.Elm18
+    - Elminator.Elm19
 
 tests:
   elminator-test:

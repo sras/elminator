@@ -25,16 +25,16 @@ import Data.Aeson (Options)
 
 
 instance ToHType Char where
-  toHType _ = pure $ HPrimitive (MData "Char" "" "" Nothing) ()
+  toHType _ = pure $ HPrimitive (MData "Char" "" "")
 
 instance ToHType Int where
-  toHType _ = pure $ HPrimitive (MData "Int" "" "" Nothing) ()
+  toHType _ = pure $ HPrimitive (MData "Int" "" "")
 
 instance ToHType Float where
-  toHType _ = pure $ HPrimitive (MData "Float" "" "" Nothing) ()
+  toHType _ = pure $ HPrimitive (MData "Float" "" "")
 
 instance ToHType Bool where
-  toHType _ = pure $ HPrimitive (MData "Bool" "" "" Nothing) ()
+  toHType _ = pure $ HPrimitive (MData "Bool" "" "")
 
 -- Common types
 
@@ -43,7 +43,7 @@ instance (ToHType a, ToHType b) => ToHType (Either a b)
 instance (ToHType a) => ToHType (Maybe a) where
   toHType _ = do
     htype <- (toHType (Proxy :: Proxy a))
-    pure $ HMaybe (MData "Maybe" "" "" Nothing) htype
+    pure $ HMaybe htype
 
 instance (ToHType a, ToHType b) => ToHType (a, b)
 
@@ -53,7 +53,7 @@ instance (ToHType a) => ToHType [a] where
   toHType _ = do
     htype <- (toHType (Proxy :: Proxy a))
     pure $ case htype  of
-      HPrimitive (MData "Char" _ _ _) _ -> HPrimitive (MData "String" "" "" Nothing) ()
+      HPrimitive (MData "Char" _ _) -> HPrimitive (MData "String" "" "")
       hta -> HList hta
 
 addItem
@@ -64,12 +64,12 @@ addItem
 addItem dc p = do
   let hType = SState.evalState (toHType p) (DMS.empty)
   mdata <- case hType of
-    HType m _ _ -> pure m
-    HPrimitive m _ -> pure m
-    HMaybe md _ -> pure md
+    HUDef (UDefData m _ _ _) -> pure m
+    HPrimitive _ -> error "Direct encoding of primitive type is not supported"
+    HMaybe _ -> error "Direct encoding of maybe type is not supported"
     HList _ -> error "Direct encoding of list type is not supported"
     HTypeVar _ -> error "Unexpected meta data"
-    HRecursive md -> pure md
+    HRecursive _ -> error "Unexpected meta data"
   s <- get
   put $ case DMS.lookup mdata s of
     Just x -> DMS.insert mdata ((dc mdata, hType):x) s

@@ -5,6 +5,8 @@ license:             BSD3
 author:              "Sandeep.C.R"
 maintainer:          "sandeepcr2@protonmail.com"
 copyright:           "2019 Sandeep.C.R"
+category:            Code Generation, Elm
+synopsis:            Generate ELM types/encoders/decoders from Haskell types.
 
 extra-source-files:
 - README.md

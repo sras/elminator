@@ -8,6 +8,9 @@
 {-# Language KindSignatures #-}
 {-# Language ScopedTypeVariables #-}
 {-# Language DeriveAnyClass #-}
+{-# Language TypeFamilies #-}
+{-# Language UndecidableInstances #-}
+{-# Language PolyKinds #-}
 
 module Generics.Simple where
 
@@ -15,13 +18,14 @@ import Data.Text
 import GHC.Generics
 import Data.Proxy
 import GHC.TypeLits
-import Language.Haskell.TH
 import Control.Monad.State.Strict
 import qualified Data.Map.Strict as DMS
+import qualified Data.List as DL
+import Language.Haskell.TH
 
 data CName = CName Text deriving (Show)
 
-data HField_ a = HField (Maybe Text) (HType_ a) deriving (Show)
+data HField = HField (Maybe Text) HType deriving (Show)
 
 type HState = State (DMS.Map MData ())
 
@@ -30,25 +34,30 @@ data MData =
     { _mTypeName :: Text
     , _mModuleName :: Text
     , _mPackageName :: Text
-    , _mTypeArgs :: Maybe [Name]
     } deriving (Show, Ord, Eq)
 
-data HConstructor_ a
-  = HConstructor CName [HField_ a]
+data HConstructor
+  = HConstructor CName [HField]
   deriving (Show)
 
-data HType_ a
-  = HType MData [HConstructor_ a] a
-  | HMaybe MData (HType_ a)
-  | HList (HType_ a)
-  | HPrimitive MData a
-  | HTypeVar Text -- Used when representing polymorphic types
+type TypeArgs = Maybe [HType]
+
+data UDefData
+  = UDefData
+      { udefdMdata :: MData
+      , udefdTypeArgs :: [HType] -- to store the concrete types this type was initialized with.
+      , udefdTypeVars :: Maybe ([Name]) -- to store the type variables info from reify.
+      , udefDConstructors :: [HConstructor]
+      } deriving (Show)
+
+data HType
+  = HUDef UDefData
+  | HMaybe HType -- We need to indentify Maybe fields so that they can be special cased for omitNothingFields.
+  | HList HType
+  | HPrimitive MData
+  | HTypeVar Name -- Used when representing polymorphic types
   | HRecursive MData
   deriving (Show)
-
-type HType = HType_ ()
-type HField = HField_ ()
-type HConstructor = HConstructor_ ()
 
 class ToHType_ (f :: * -> *) where
   toHType_ :: (Proxy f) -> HState HType
@@ -59,10 +68,28 @@ class ToHField_ (f :: * -> *) where
 class ToHConstructor_ (f :: * -> *) where
   toHConstructor_ :: (Proxy f) -> HState [HConstructor]
 
+type family ExtractTArgs (f :: k) :: [*] where
+  ExtractTArgs ((b :: * -> k) a) = a:(ExtractTArgs b)
+  ExtractTArgs f = '[]
+
+class ToHTArgs f where
+  toHTArgs :: Proxy f -> [HState HType]
+
+instance ToHTArgs '[] where
+  toHTArgs _ = []
+
+instance (ToHType a, ToHTArgs x) => ToHTArgs (a:x) where
+  toHTArgs _ = (toHType (Proxy :: Proxy a)):(toHTArgs (Proxy :: Proxy x))
+
 class ToHType f where
   toHType :: (Proxy f) -> HState HType
-  default toHType :: (Generic f, ToHType_ (Rep f)) => (Proxy f) -> HState HType
-  toHType _ = toHType_ (Proxy :: (Proxy (Rep f)))
+  default toHType :: (ToHTArgs (ExtractTArgs f), Generic f, ToHType_ (Rep f)) => (Proxy f) -> HState HType
+  toHType _ = do
+    targs <- sequence (toHTArgs (Proxy :: Proxy (ExtractTArgs f)))
+    htype <- toHType_ (Proxy :: (Proxy (Rep f)))
+    pure $ case htype of
+      HUDef ud -> HUDef $ ud { udefdTypeArgs = DL.reverse targs }
+      a -> a
 
 instance (ToHConstructor_ b, KnownSymbol a1, KnownSymbol a2, KnownSymbol a3) => ToHType_ (D1 ('MetaData a1 a2 a3 a4) b) where
   toHType_ _ = let
@@ -70,7 +97,7 @@ instance (ToHConstructor_ b, KnownSymbol a1, KnownSymbol a2, KnownSymbol a3) => 
       (pack $ symbolVal (Proxy :: Proxy a1))
       (pack $ symbolVal (Proxy :: Proxy a2))
       (pack $ symbolVal (Proxy :: Proxy a3))
-      Nothing)
+      )
     in do
       seen <- get
       case DMS.lookup mdata seen of
@@ -79,7 +106,7 @@ instance (ToHConstructor_ b, KnownSymbol a1, KnownSymbol a2, KnownSymbol a3) => 
           put $ DMS.insert mdata () seen
           cons_ <- (toHConstructor_ (Proxy :: Proxy b))
           pure $
-            HType mdata cons_ ()
+            HUDef $ UDefData mdata [] Nothing cons_
 
 instance (KnownSymbol cname, ToHField_ s) => ToHConstructor_ (C1 ('MetaCons cname a b) s) where
   toHConstructor_ _ = do

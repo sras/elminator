@@ -32,30 +32,29 @@ elmFront = "\
 
 generateElm :: DefConfig -> HType -> Options -> LibM Text
 generateElm d h opt = do
-  ht <- deriveType h
   case d of
     GenerateDefPoly _ -> do
-      htt <- mkPolyMorphic ht
-      pure $ renderElm $ ElmSrc [generateElmDef $ toTypeDescriptor htt]
+      hp <- mkPolyMorphic h
+      pure $ renderElm $ ElmSrc [generateElmDef $ toTypeDescriptor hp]
     GenerateDefSimple _ ->
-      pure $ renderElm $ ElmSrc [generateElmDef $ toTypeDescriptor ht]
+      pure $ renderElm $ ElmSrc [generateElmDef $ toTypeDescriptor h]
     GenerateEncDec _ -> do
       pure $ renderElm $ ElmSrc
-        [ generateEncoder (toTypeDescriptor ht) opt
-        , generateDecoder (toTypeDescriptor ht) opt
+        [ generateEncoder (toTypeDescriptor h) opt
+        , generateDecoder (toTypeDescriptor h) opt
         ]
     GenerateAll _ -> do
       pure $ renderElm $ ElmSrc
-        [ generateElmDef $ toTypeDescriptor ht
-        , generateEncoder (toTypeDescriptor ht) opt
-        , generateDecoder (toTypeDescriptor ht) opt
+        [ generateElmDef $ toTypeDescriptor h
+        , generateEncoder (toTypeDescriptor h) opt
+        , generateDecoder (toTypeDescriptor h) opt
         ]
     GenerateAllPoly _ -> do
-      htt <- mkPolyMorphic ht
+      hp <- mkPolyMorphic h
       pure $ renderElm $ ElmSrc
-        [ generateElmDef $ toTypeDescriptor htt
-        , generateEncoder (toTypeDescriptor ht) opt
-        , generateDecoder (toTypeDescriptor ht) opt
+        [ generateElmDef $ toTypeDescriptor hp
+        , generateEncoder (toTypeDescriptor h) opt
+        , generateDecoder (toTypeDescriptor h) opt
         ]
 
 getCTDataName :: CTData -> Text
@@ -343,10 +342,10 @@ generateElmDef (Concrete (CTData tname _ c))
   = EType tname [] $ generateElmDefC c
 generateElmDef (Concrete (CTEmpty tname _))
   = EType tname [] EEmpty
-generateElmDef (Polymorphic targs (CTData tname _ c))
-  = EType tname targs $ generateElmDefC c
-generateElmDef (Polymorphic targs (CTEmpty tname _))
-  = EType tname targs EEmpty
+generateElmDef (Polymorphic tvars (CTData tname _ c))
+  = EType tname ((pack . nameToText) <$> tvars) $ generateElmDefC c
+generateElmDef (Polymorphic _targs (CTEmpty tname _))
+  = EType tname undefined EEmpty
 generateElmDef _
   = error "Not implemented"
 

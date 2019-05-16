@@ -8,12 +8,11 @@
 module Elminator.Lib where
 
 import Generics.Simple
-import Data.Text as T
+import Data.Text as T hiding (foldr)
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax
 import qualified Data.List as DL
 import qualified Data.Map.Strict as DMS
-import Data.Maybe
 import Control.Monad.Reader as R
 import Control.Monad.State.Lazy
 import Data.List.NonEmpty (NonEmpty((:|)))
@@ -102,10 +101,10 @@ renderSpace = renderText " "
 renderElmDec :: EDec -> RenderM ()
 renderElmDec (EType name targs cons_) = do
   renderCI
-  renderText "type "
+  renderText "type"
   renderSpace
   renderText name 
-  renderSpace 
+  if DL.length targs > 0 then renderSpace  else pure ()
   renderIC (renderSpace) targs renderText
   renderSpace 
   renderText "=" 
@@ -301,15 +300,11 @@ type GenConfig
 
 type SConfig = State GenConfig ()
 
-type HTypeTxt = HType_ MyT
-type HFieldTxt = HField_ MyT
-type HConstructorTxt = HConstructor_ MyT
-
 data ElmVersion = Elm18 | Elm19
 
 data TypeDescriptor
   = Concrete CTData
-  | Polymorphic [Text] CTData
+  | Polymorphic [Name] CTData
   | List TypeDescriptor Text
   | TDMaybe TypeDescriptor Text
   | Primitive Text Text
@@ -348,65 +343,57 @@ getCTDName _ = error "Unimpl"
 renderNamedField :: ENamedField -> Text
 renderNamedField (name, td) = T.concat [ name, " : ", getRenderedName td]
 
-convertHField :: HField -> ReaderT GenConfig Q HFieldTxt
-convertHField (HField a t) = do
-  b <- deriveType t
-  pure $ HField a b
-
-convertHCon :: HConstructor -> ReaderT GenConfig Q HConstructorTxt
-convertHCon (HConstructor a b) = do
-  fields <- mapM convertHField b
-  pure $ HConstructor a fields
-
--- | Takes an HTypeText, refies the corresponding
+-- | Takes an HType, refies the corresponding
 -- type using template haskell, and inserts type arguments
 -- from the original type into the corresponding types in the
 -- constructor fields, replacing the concrete types there.
 --
-mkPolyMorphic :: HTypeTxt -> LibM HTypeTxt
-mkPolyMorphic _htype@(HType (MData tnString a b _) hcons _) = do
+mkPolyMorphic :: HType -> LibM HType
+mkPolyMorphic _htype@(HUDef (UDefData (MData tnString a b) targs _ hcons)) = do
   mtName <- R.lift $ lookupTypeName $ unpack tnString
   case mtName of
     Just tName -> do
       info <- R.lift $ reify tName
-      let tArgs = getTypeArgs info
-      pure $ HType
-        (MData tnString a b $ Just tArgs)
-        (Prelude.foldr
+      let tVars = getTypeArgs info
+      pure $ HUDef $ UDefData
+        (MData tnString a b)
+        targs
+        (Just tVars)
+        (foldr
           (mkPolyMorphicConstructor (getConstructors info))
           hcons
-          tArgs)
-        (mkMyT $ MyT <$> tArgs)
+          tVars)
     Nothing -> error $ unpack $ T.concat ["Cannot find type with name ", tnString, " in scope"]
   where
-    mkPolyMorphicConstructor :: [Con] -> Name -> [HConstructorTxt] -> [HConstructorTxt]
+    mkPolyMorphicConstructor :: [Con] -> Name -> [HConstructor] -> [HConstructor]
     mkPolyMorphicConstructor cons_ tvName hcons_ =
         DL.zipWith (mkPolyMorphicConstructor_ tvName) hcons_ cons_
       where
-      mkPolyMorphicConstructor_ :: Name -> HConstructorTxt -> Con -> HConstructorTxt
+      mkPolyMorphicConstructor_ :: Name -> HConstructor -> Con -> HConstructor
       mkPolyMorphicConstructor_ tvName_ (HConstructor cn fields) con =
        HConstructor cn $
          DL.zipWith
            (mkPolyMorphicField tvName_)
            fields
            (getConstructorFields con)
-    mkPolyMorphicField :: Name -> HFieldTxt -> Type -> HFieldTxt
-    mkPolyMorphicField tvName (HField fn ht) t = HField fn (insertTVar tvName ht t)
-    insertTVar :: Name -> HTypeTxt -> Type -> HTypeTxt
-    insertTVar tvName (HType md hc mt) t = HType md hc $ insertTVar_ tvName mt t
-    insertTVar tvName (HPrimitive md mt) t = HPrimitive md $ insertTVar_ tvName mt t
-    insertTVar tvName (HList ht) (AppT ListT t) = HList (insertTVar tvName ht t)
-    insertTVar tvName (HMaybe md ht) (AppT _ t) = HMaybe md (insertTVar tvName ht t)
-    insertTVar _ (HTypeVar a_) _ = HTypeVar a_
-    insertTVar _ (HRecursive md) _ = HRecursive md
-    insertTVar _ _ _ = error "Not implemented"
-    insertTVar_ :: Name -> MyT -> Type -> MyT
-    insertTVar_ tvName myt (VarT n) =
-      if tvName == n then MyT tvName
-        else myt
-    insertTVar_ _ myt (ConT _) = myt
-    insertTVar_ tvName (MyAppT m1 m2) (AppT t1 t2) = MyAppT (insertTVar_ tvName m1 t1) (insertTVar_ tvName m2 t2)
-    insertTVar_ _ a1 _ = a1
+      mkPolyMorphicField :: Name -> HField -> Type -> HField
+      mkPolyMorphicField _tvName (HField fn ht) t = HField fn (insertTVar tvName ht t)
+      insertTVar :: Name -> HType -> Type -> HType
+      insertTVar tvname h (VarT n) =
+        if n == tvname
+          then (HTypeVar n)
+          else h
+      insertTVar tvname (HUDef udefd) typ = let
+        taList = DL.reverse $ udefdTypeArgs udefd
+        in HUDef $ udefd { udefdTypeArgs = DL.reverse $ insertTVar_ taList typ }
+        where
+          insertTVar_ :: [HType] -> Type -> [HType]
+          insertTVar_ (h:hs) (AppT t1 t2) =
+            (insertTVar tvname h t2):(insertTVar_ hs t1)
+          insertTVar_ hs _ =  hs
+      insertTVar tvname (HList ht) (AppT ListT t) = HList (insertTVar tvname ht t)
+      insertTVar tvname (HMaybe ht) (AppT _ t) = HMaybe (insertTVar tvname ht t)
+      insertTVar _ x _ = x
     getConstructorFields :: Con -> [Type]
     getConstructorFields c =
       case c of
@@ -415,155 +402,22 @@ mkPolyMorphic _htype@(HType (MData tnString a b _) hcons _) = do
         _ -> error "Not implemented"
 mkPolyMorphic _ = error "Not implemented"
 
-deriveType :: HType -> LibM HTypeTxt
-deriveType htype@(HType (MData _ _ _ _) _ _) = do
-  ta <- getConcreteTypeArgs htype
-  let HType a b _ = htype in do
-    consts <- mapM convertHCon b
-    pure $ HType a consts ta
-deriveType (HPrimitive (MData tnString a b c) _) = pure (HPrimitive (MData tnString a b c) (MyT $ mkName $ unpack $ tnString))
-deriveType (HList a) = do
-  htt <- deriveType a
-  pure $ HList htt
-deriveType (HMaybe md a) = do
-  htt <- deriveType a
-  pure $ HMaybe md htt
-deriveType (HRecursive mdata) = pure (HRecursive mdata)
-deriveType _ = error "Unimplemented"
-
 dropPackagePrefix :: String -> String
 dropPackagePrefix x = DL.reverse $ DL.takeWhile (/= '.') $ DL.reverse x
-
-data MyT = MyEmpty | MyAppT MyT MyT | MyT Name deriving (Show)
-
-mkMyT :: [MyT] -> MyT
-mkMyT [] = MyEmpty
-mkMyT (x:xs) = DL.foldl (\a i -> MyAppT a i) x xs
-
-myTtoText :: MyT -> Bool -> Text
-myTtoText myt wp = if isTuple myt then formatTuple myt else myTtoText' myt wp
-  where
-  myTtoText' :: MyT -> Bool -> Text
-  myTtoText' (MyT name) _ = T.strip $ pack $ nameToText name
-  myTtoText' (MyAppT t1 MyEmpty) True = myTtoText t1 False
-  myTtoText' (MyAppT t1 t2) True = T.concat ["(", myTtoText t1 False, " ", myTtoText t2 True, ")"]
-  myTtoText' (MyAppT t1 t2) False = T.concat [myTtoText t1 False, " ", myTtoText t2 True]
-  myTtoText' MyEmpty _ = ""
-  formatTuple :: MyT -> Text
-  formatTuple myt_ = T.concat ["(", T.intercalate "," $ DL.reverse $ formatTuple' myt_, ")"]
-    where
-    formatTuple' :: MyT -> [Text]
-    formatTuple' (MyT _) = []
-    formatTuple' MyEmpty = []
-    formatTuple' (MyAppT t1 t2) = (myTtoText t2 True):(formatTuple' t1)
-  isTuple :: MyT -> Bool
-  isTuple (MyT name) =
-    case (nameToText name) of
-      [] -> False
-      (c:_) -> c == '('
-  isTuple MyEmpty = False
-  isTuple (MyAppT t1 _) = isTuple t1
-
-getConcreteTypeArgs :: HType -> LibM MyT
-getConcreteTypeArgs (HType (MData tnString _ _ _) htcons _) = do
-  info <- getInfo $ unpack tnString
-  tArgs <- mapM (lookupTypeArg info) (getTypeArgs info)
-  pure $ mkMyT ((MyT $ mkName $ unpack $ tnString) : tArgs)
-  where
-    lookupTypeArg :: Info -> Name -> LibM MyT
-    lookupTypeArg info tvName = do
-      let (ahType, aType) = getTypeInfo getConstructorField
-      cTypes <- getConcreteTypeArgs ahType
-      pure $ unwrapBoth cTypes aType
-      where
-        unwrapBoth :: MyT -> Type -> MyT
-        unwrapBoth mt (VarT tname) = if tname == tvName then mt else error "Type lookup failed"
-        unwrapBoth (MyAppT mt1 mt2) (AppT t1 t2) =
-          if lookInType t1 then unwrapBoth mt1 t1 else unwrapBoth mt2 t2
-          where
-            lookInType :: Type -> Bool
-            lookInType (AppT t1_ t2_) = if lookInType t1_ then True else lookInType t2_
-            lookInType (ConT _) = False
-            lookInType (VarT n) = n == tvName
-            lookInType _  = error "Unimplemented"
-        unwrapBoth a@(MyT _) _ = a
-        unwrapBoth a@(MyEmpty) _ = a
-        unwrapBoth _ _ = error "Unimplemented"
-        getConstructorField :: (Name, Int)
-        getConstructorField =
-          case catMaybes $ lookInConstructor <$> (getConstructors info) of
-            (a:_) -> a
-            _ -> error ("Constructor lookup failed for type var " ++ show tvName)
-            where
-              lookInConstructor :: Con -> Maybe (Name, Int)
-              lookInConstructor c = let
-                (cname, cargs) = getConstructorInfo c
-                in case DL.filter isJust $ DL.zipWith lookInType cargs [0..] of
-                  ((Just x):_) -> Just (cname, x)
-                  _ -> Nothing
-                where
-                lookInType :: Type -> Int -> Maybe Int
-                lookInType (VarT x) idx = if x == tvName then Just idx else Nothing
-                lookInType (AppT t1 t2) idx =
-                  case lookInType t2 idx of
-                    Just a -> Just a
-                    Nothing -> lookInType t1 idx
-                lookInType _ _ = Nothing
-        getConstructorInfo :: Con -> (Name, [Type])
-        getConstructorInfo c =
-          case c of
-            (NormalC n args) -> (n, snd <$> args)
-            (RecC n args) -> (n, (\(_, _, x) -> x) <$> args)
-            x -> error ("Unsupported constructor given to fetch info" ++ show x)
-        getTypeInfo :: (Name, Int) -> (HType, Type)
-        getTypeInfo (cName, fIdx) =
-          case DL.find findFn htcons of
-            Just (HConstructor (CName _) fields) ->
-              let HField _ htype = fields !! fIdx in (htype, getTHType)
-            Nothing -> error "Constructor not found in htype"
-          where
-            findFn :: HConstructor -> Bool
-            findFn (HConstructor (CName x) _) = unpack x == nameToText cName
-            getTHType :: Type
-            getTHType =
-              case DL.find findFn2 (getConstructors info) of
-                Just con ->
-                  let (_, fields) = getConstructorInfo con in fields !! fIdx
-                Nothing -> error "Unimplemented"
-              where
-                findFn2 :: Con -> Bool
-                findFn2 c = let (x, _) = getConstructorInfo c in cName == x
-    getInfo :: String -> LibM Info
-    getInfo tName = do
-      mtName <- R.lift $ lookupTypeName tName
-      case mtName of
-        Just tName_ -> do
-          R.lift $ reify tName_
-        Nothing -> do -- To make tuples work
-          R.lift $ reify $ mkName tName
-getConcreteTypeArgs (HPrimitive md _) = pure $ MyT $ mkName $ unpack $  _mTypeName md
-getConcreteTypeArgs (HList ht) = do
-  x <- getConcreteTypeArgs ht
-  pure $ MyAppT (MyT $ mkName "List") x 
-getConcreteTypeArgs (HMaybe _ ht) = do
-  x <- getConcreteTypeArgs ht
-  pure $ MyAppT (MyT $ mkName "Maybe") x 
-getConcreteTypeArgs (HRecursive md) = pure $ MyT $ mkName $ unpack $ _mTypeName md
-getConcreteTypeArgs _ = error "Unimplemented"
-
-extractMd :: HType_ a -> MData
-extractMd (HType md _ _ )= md
-extractMd (HMaybe md _) = md
-extractMd (HList _)= error "Meta data not available"
-extractMd (HPrimitive md _ )= md
-extractMd (HTypeVar _)= error "Meta data not available"
-extractMd (HRecursive md)= md
 
 getConstructors :: Info -> [Con]
 getConstructors info =
   case info of
     TyConI (DataD [] _ _ _ c _) -> c
     _ -> error "Unsupported type info"
+
+extractMd :: HType -> MData
+extractMd (HUDef (UDefData md  _ _ _))= md
+extractMd (HMaybe _) = MData "Maybe" "" ""
+extractMd (HList _)= error "Meta data not available"
+extractMd (HPrimitive md)= md
+extractMd (HTypeVar _)= error "Meta data not available"
+extractMd (HRecursive md)= md
 
 getTypeArgs :: Info -> [Name]
 getTypeArgs (TyConI (DataD _ _ args _ _ _)) = mapFn <$> args
@@ -576,55 +430,63 @@ getTypeArgs _ = error "Unimplemented"
 nameToText :: Name -> String
 nameToText (Name (OccName a) _) = a
 
-httToName :: HTypeTxt -> Text
-httToName (HType _ _ t) = myTtoText t True
-httToName (HPrimitive _ t) = myTtoText t True
-httToName (HList t) = T.concat ["(List ", httToName t, ")"]
-httToName (HTypeVar t) = t
-httToName (HMaybe _ ht) = T.concat ["(Maybe ", httToName ht, ")"]
-httToName (HRecursive md) = _mTypeName md
+renderHType :: HType -> Text
+renderHType htype = renderHType_ htype True
 
-toTypeDescriptor :: HTypeTxt -> TypeDescriptor
-toTypeDescriptor ht@(HType (MData tnString _ _ (Just (ta@(_:_)))) x _) = 
-  Polymorphic (pack.nameToText <$> ta) $
+renderHType_ :: HType -> Bool -> Text
+renderHType_ h@(HUDef u) ip = 
+  if ip
+    then if DL.length (udefdTypeArgs u )> 0
+      then T.concat ["(", renderHType_ h False, ")"]
+      else renderHType_ h False
+    else T.intercalate " "  $ (_mTypeName $ udefdMdata u):(renderHType <$> udefdTypeArgs u)
+renderHType_ (HPrimitive md) _ = _mTypeName md
+renderHType_ (HList t) _ = T.concat ["(List ", renderHType_ t True, ")"]
+renderHType_ (HTypeVar t) _ = pack $ nameToText t
+renderHType_ (HMaybe ht) _ = T.concat ["(Maybe ", renderHType_ ht True, ")"]
+renderHType_ (HRecursive md) _ = _mTypeName md
+
+toTypeDescriptor :: HType -> TypeDescriptor
+toTypeDescriptor ht@(HUDef (UDefData (MData tnString _ _) (_:_) (Just tv) x)) =
+  Polymorphic tv $
     case x of
-      [] -> CTEmpty tnString (httToName ht)
-      (a:as) -> CTData tnString (httToName ht) $ toConstructors (a:|as)
-toTypeDescriptor ht@(HType (MData tnString _ _ Nothing) x _) =
+      [] -> CTEmpty tnString (renderHType ht)
+      (a:as) -> CTData tnString (renderHType ht) $ toConstructors (a:|as)
+toTypeDescriptor ht@(HUDef (UDefData (MData tnString _ _) _ _ x)) =
   Concrete $
     case x of 
-      [] -> CTEmpty tnString (httToName ht)
-      (a:as) -> CTData tnString (httToName ht) $ toConstructors (a:|as)
-toTypeDescriptor ht@(HPrimitive (MData tnString _ _ _) _) = Primitive tnString (httToName ht)
-toTypeDescriptor a@(HList t) = List (toTypeDescriptor t) (httToName a)
-toTypeDescriptor a@(HMaybe _ t) = TDMaybe (toTypeDescriptor t) (httToName a)
+      [] -> CTEmpty tnString (renderHType ht)
+      (a:as) -> CTData tnString (renderHType ht) $ toConstructors (a:|as)
+toTypeDescriptor ht@(HPrimitive (MData tnString _ _)) = Primitive tnString (renderHType ht)
+toTypeDescriptor a@(HList t) = List (toTypeDescriptor t) (renderHType a)
+toTypeDescriptor a@(HMaybe t) = TDMaybe (toTypeDescriptor t) (renderHType a)
 toTypeDescriptor (HRecursive md) = TRecusrive $ md
 toTypeDescriptor a = error $ show a
 
-toConstructors :: NE.NonEmpty HConstructorTxt -> Constructors
+toConstructors :: NE.NonEmpty HConstructor -> Constructors
 toConstructors (x :| []) = SingleConstructor (mkConstructorDesc x)
 toConstructors (x :| xs) = ManyConstructors $ (mkConstructorDesc x) NE.:| (mkConstructorDesc <$> xs)
 
-mkConstructorDesc :: HConstructorTxt -> ConstructorDescriptor
+mkConstructorDesc :: HConstructor -> ConstructorDescriptor
 mkConstructorDesc (HConstructor (CName cname) fs) =
   case fs of
     [] -> NullaryConstructor cname
     (hf@(HField (Just _) _):hfs) -> RecordConstructor cname $ mkRecordFields (hf NE.:| hfs)
     (hf@(HField Nothing _):hfs) -> SimpleConstructor cname $ mkUnNamedFields (hf NE.:| hfs)
 
-mkRecordFields :: NE.NonEmpty HFieldTxt -> Fields NamedField
+mkRecordFields :: NE.NonEmpty HField -> Fields NamedField
 mkRecordFields (x :| []) = SingleField $ mkRecordField x
 mkRecordFields (x :| xs) = ManyFields $ (mkRecordField x) NE.:| (mkRecordField <$> xs)
 
-mkRecordField :: HFieldTxt -> NamedField
+mkRecordField :: HField -> NamedField
 mkRecordField (HField (Just x) htype) = NamedField x (toTypeDescriptor htype)
 mkRecordField _ = error "Incompatible field to make a named field"
 
-mkUnNamedFields :: NE.NonEmpty HFieldTxt -> Fields TypeDescriptor
+mkUnNamedFields :: NE.NonEmpty HField -> Fields TypeDescriptor
 mkUnNamedFields (x :| []) = SingleField $ mkUnNamedField x
 mkUnNamedFields (x :| xs) = ManyFields $ (mkUnNamedField x) NE.:| (mkUnNamedField <$> xs)
 
-mkUnNamedField :: HFieldTxt -> TypeDescriptor
+mkUnNamedField :: HField -> TypeDescriptor
 mkUnNamedField (HField _ htype) = toTypeDescriptor htype
 
 getRenderedName :: TypeDescriptor -> Text

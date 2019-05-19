@@ -12,7 +12,7 @@
 {-# Language UndecidableInstances #-}
 {-# Language PolyKinds #-}
 
-module Generics.Simple where
+module Elminator.Generics.Simple where
 
 import Data.Text
 import GHC.Generics
@@ -40,13 +40,16 @@ data HConstructor
   = HConstructor CName [HField]
   deriving (Show)
 
-type TypeArgs = Maybe [HType]
+data TypeVar
+  = Used Name
+  | Phantom Name
+  deriving (Eq, Show)
 
 data UDefData
   = UDefData
       { udefdMdata :: MData
       , udefdTypeArgs :: [HType] -- to store the concrete types this type was initialized with.
-      , udefdTypeVars :: Maybe ([Name]) -- to store the type variables info from reify.
+      , udefdTypeVars :: Maybe [TypeVar] -- to store the type variables info from reify.
       , udefDConstructors :: [HConstructor]
       } deriving (Show)
 

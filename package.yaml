@@ -3,7 +3,7 @@ version:             0.1.0.0
 git:                 "https://github.com/sras/elminator.git"
 license:             BSD3
 author:              "Sandeep.C.R"
-maintainer:          "sandeepcr2@protonmail.com"
+maintainer:          "sandeep@sras.me"
 copyright:           "2019 Sandeep.C.R"
 category:            Code Generation, Elm
 synopsis:            Generate ELM types/encoders/decoders from Haskell types.
@@ -29,9 +29,9 @@ library:
   exposed-modules:
     - Elminator
   other-modules:
-    - Generics.Simple
+    - Elminator.Generics.Simple
+    - Elminator.ELM.CodeGen
     - Elminator.Lib
-    - Elminator.Elm18
     - Elminator.Elm19
 
 tests:

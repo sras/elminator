@@ -1,15 +1,20 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Elminator.Elm19 (generateElm, elmFront) where
+module Elminator.Elm19 (generateElm, elmFront, typeDescriptorToDecoder) where
 
-import Generics.Simple
+import Elminator.Generics.Simple
+import Elminator.ELM.CodeGen
 import Elminator.Lib
-import Data.Text as T hiding (zipWith)
+import Data.Text as T hiding (any, zipWith)
 import Data.Aeson as Aeson
 import qualified Data.List as DL
 import qualified Data.List.NonEmpty as NE
+import Data.List.NonEmpty (NonEmpty((:|)))
 import Prelude
 import qualified Prelude as P
+import Control.Monad.Reader as R
+import qualified Data.Map.Strict as DMS
+import Data.Maybe
 
 elmFront :: Text
 elmFront = "\
@@ -30,90 +35,61 @@ elmFront = "\
 \  Nothing -> E.null\n\
 \\n\n"
 
-generateElm :: DefConfig -> HType -> Options -> LibM Text
-generateElm d h opt = do
+generateElm :: GenOption -> HType -> Options -> LibM Text
+generateElm d h opts = do
   case d of
-    GenerateDefPoly _ -> do
+    Definiton Poly  -> do
       hp <- mkPolyMorphic h
-      pure $ renderElm $ ElmSrc [generateElmDef $ toTypeDescriptor hp]
-    GenerateDefSimple _ ->
-      pure $ renderElm $ ElmSrc [generateElmDef $ toTypeDescriptor h]
-    GenerateEncDec _ -> do
-      pure $ renderElm $ ElmSrc
-        [ generateEncoder (toTypeDescriptor h) opt
-        , generateDecoder (toTypeDescriptor h) opt
-        ]
-    GenerateAll _ -> do
-      pure $ renderElm $ ElmSrc
-        [ generateElmDef $ toTypeDescriptor h
-        , generateEncoder (toTypeDescriptor h) opt
-        , generateDecoder (toTypeDescriptor h) opt
-        ]
-    GenerateAllPoly _ -> do
+      def <- generateElmDef $ toTypeDescriptor hp
+      pure $ renderElm $ ElmSrc [def]
+    Definiton Mono -> do
+      def <- generateElmDef $ toTypeDescriptor h
+      pure $ renderElm $ ElmSrc [def]
+    EncoderDecoder -> do
+      let
+        td = toTypeDescriptor h
+        decoder = typeDescriptorToDecoder opts td
+      encSrc <- generateEncoder (td, decoder)
+      decSrc <- generateDecoder (td, decoder)
+      pure $ renderElm $ ElmSrc [encSrc, decSrc]
+    Everything Mono -> do
+      let
+        td = (toTypeDescriptor h)
+        decoder = typeDescriptorToDecoder opts td
+      def <- generateElmDef td
+      encSrc <- generateEncoder (td, decoder)
+      decSrc <- generateDecoder (td, decoder)
+      pure $ renderElm $ ElmSrc [def, encSrc, decSrc]
+    Everything Poly -> do
       hp <- mkPolyMorphic h
-      pure $ renderElm $ ElmSrc
-        [ generateElmDef $ toTypeDescriptor hp
-        , generateEncoder (toTypeDescriptor h) opt
-        , generateDecoder (toTypeDescriptor h) opt
-        ]
+      let
+        td = toTypeDescriptor hp
+        decoder = typeDescriptorToDecoder opts td
+      def <- generateElmDef td
+      encSrc <- generateEncoder (td, decoder)
+      decSrc <- generateDecoder (td, decoder)
+      pure $ renderElm $ ElmSrc [def, encSrc, decSrc]
 
 getCTDataName :: CTData -> Text
-getCTDataName (CTData n _ _) = n
-getCTDataName (CTEmpty _ _) = ""
+getCTDataName (CTData n _) = tnHead n
+getCTDataName (CTEmpty n) = tnHead n
 
-generateDecoder :: TypeDescriptor -> Options -> EDec
-generateDecoder (Concrete ctdata) opts = let
-  expr = generateDecoderCtd ctdata opts
-  in EFunc
-    (T.concat
-      [ "decode"
-      , getCTDataName ctdata]) 
-    (Just $ T.concat ["D.Decoder", " ", getRenderedNameFromCTdata ctdata]) [] $
-    expr
-generateDecoder _ _ = error "Unim"
-
-generateDecoderCtd :: CTData -> Options -> EExpr
-generateDecoderCtd (CTData _ _ crs) opts = decoderToDecoderEExpr (gdConstructor crs opts)
-generateDecoderCtd (CTEmpty _ _) _ = error "No value to decode"
-
-gdConstructor :: Constructors -> Options -> Decoder
-gdConstructor (SingleConstructor cd) opts =
-  if tagSingleConstructors opts
-    then gdTaggedWithConstructor [cd] opts
-    else DUntagged $ [(getCName cd, mkContentDecoder cd opts)]
-gdConstructor (ManyConstructors cds) opts =
-  gdTaggedWithConstructor (NE.toList cds) opts
-
-gdTaggedWithConstructor :: [ConstructorDescriptor] -> Options -> Decoder
-gdTaggedWithConstructor cds opts =
-  case sumEncoding opts of
-    TaggedObject tfn cfn ->
-        DTagged (pack tfn) (pack cfn) cdPair
-    ObjectWithSingleField -> DUnderConKey cdPair
-    TwoElemArray -> DTwoElement cdPair
-    UntaggedValue -> DUntagged $ (\cd -> (getCName cd, mkContentDecoder cd opts)) <$> cds
+generateDecoder :: (TypeDescriptor, Decoder) -> LibM EDec
+generateDecoder (td, decoder) = do
+  tdisplay <- mkTypeDisplayFromTd td
+  pure $ case td of
+    (SimpleType ctdata) -> fn ctdata tdisplay
+    (Polymorphic _  ctdata) -> fn ctdata tdisplay
+    _ -> error "Encoders/decoders can only be made for user defined types"
   where
-    cdPair :: [(ConName, ConTag, ContentDecoder)]
-    cdPair = (\cd -> (getCName cd, pack $ constructorTagModifier opts $ unpack $ getCName cd, mkContentDecoder cd opts)) <$> cds
-
-mkContentDecoder :: ConstructorDescriptor -> Options -> ContentDecoder
-mkContentDecoder cd opts =
-  case cd of
-    RecordConstructor _cname (SingleField nf) ->
-      if unwrapUnaryRecords opts
-        then case sumEncoding opts of
-          ObjectWithSingleField -> CDRecordRaw $ modifyFieldLabel nf
-          TwoElemArray -> CDRecordRaw $ modifyFieldLabel nf
-          UntaggedValue -> CDRecordRaw $ modifyFieldLabel nf
-          TaggedObject _ _ -> CDRecord [modifyFieldLabel nf]
-        else CDRecord [modifyFieldLabel nf]
-    RecordConstructor _cname (ManyFields nf) -> CDRecord $ NE.toList $ NE.map modifyFieldLabel nf
-    SimpleConstructor _cname (SingleField f) -> CDRaw f
-    SimpleConstructor _cname (ManyFields f) -> CDList $ NE.toList $ f
-    NullaryConstructor _ -> CDEmpty
-  where
-    modifyFieldLabel :: NamedField -> (FieldName, FieldTag, TypeDescriptor)
-    modifyFieldLabel (NamedField a b) = (a, pack $ fieldLabelModifier opts $ unpack $ a, b)
+  fn :: CTData -> TypeDisplay -> EDec
+  fn ctdata tdisp =
+    EFunc
+      (T.concat
+        [ "decode"
+        , getCTDataName ctdata]) 
+      (Just $ T.concat ["D.Decoder", " ", let TypeDisplay x = tdisp in x]) [] $
+      decoderToDecoderEExpr decoder
 
 firstOf3 :: (a, b, c) -> a
 firstOf3 (a, _, _) = a
@@ -209,26 +185,22 @@ mkRecorderMaker rmName cname fds = let
     mkField :: (FieldName, FieldTag, TypeDescriptor) -> Text -> EField
     mkField (fn, _, _) a = (fn, EName a)
 
-getCName :: ConstructorDescriptor -> Text
-getCName (RecordConstructor x _) = x
-getCName (SimpleConstructor x _) = x
-getCName (NullaryConstructor x) = x
-
-generateEncoder :: TypeDescriptor -> Options -> EDec
-generateEncoder (Concrete ctdata) opts =
-  EFunc
-    (T.concat
-      [ "encode"
-      , getCTDataName ctdata]) 
-    (Just $ T.concat [getRenderedNameFromCTdata ctdata, " -> ", "E.Value"])
-    ["a"] $
-    generateEncoderCtd ctdata opts
-generateEncoder (Polymorphic _ _) _ = error "Cannot create encoder for polymorphic type"
-generateEncoder _ _ = error "Unim"
-
-generateEncoderCtd :: CTData -> Options -> EExpr
-generateEncoderCtd (CTData _ _ crs) opts = decoderToEncoderEExpr $ gdConstructor crs opts
-generateEncoderCtd (CTEmpty _ _) _ = error "No value to encode"
+generateEncoder :: (TypeDescriptor, Decoder) -> LibM EDec
+generateEncoder (td, decoder) = do
+  tdisplay <- mkTypeDisplayFromTd td
+  pure $ case td of
+    SimpleType ctdata -> fn ctdata tdisplay
+    Polymorphic _ ctdata -> fn ctdata tdisplay
+    _ -> error "Encoders/decoders can only be made for user defined types"
+  where
+    fn :: CTData -> TypeDisplay -> EDec
+    fn ctdata tdisp = EFunc
+      (T.concat
+        [ "encode"
+        , getCTDataName ctdata]) 
+      (Just $ T.concat [let TypeDisplay x = tdisp in x, " -> ", "E.Value"])
+      ["a"] $
+      decoderToEncoderEExpr $ decoder
 
 decoderToEncoderEExpr :: Decoder -> EExpr
 decoderToEncoderEExpr d = case d of
@@ -307,7 +279,7 @@ contentDecoderToEncoderExp mct cd = case cd of
           EName $ T.concat ["x",".",fn]]
 
 getEncoderName :: TypeDescriptor -> EExpr
-getEncoderName (Concrete ctd) = EName $ T.concat ["encode", getCTDName ctd]
+getEncoderName (SimpleType ctd) = EName $ T.concat ["encode", getCTDName ctd]
 getEncoderName (Polymorphic _ ctd) = EName $ T.concat ["encode", getCTDName ctd]
 getEncoderName (Primitive n _) = EName $ getPrimitiveEncoder n
 getEncoderName (List x _) = (EFuncApp "E.list" (getEncoderName x))
@@ -315,12 +287,35 @@ getEncoderName (TDMaybe x _) = (EFuncApp "encodeMaybe" (getEncoderName x))
 getEncoderName (TRecusrive md) = EName $ T.concat ["encode", _mTypeName md]
 
 getDecoderName :: TypeDescriptor -> EExpr
-getDecoderName (Concrete ctd) = EName $ T.concat ["decode", getCTDName ctd]
-getDecoderName (Polymorphic _ ctd) = EName $ T.concat ["decode", getCTDName ctd]
-getDecoderName (Primitive n _) = EName $ getPrimitiveDecoder n
-getDecoderName (List x _) = EFuncApp (EName "D.list") (getDecoderName x)
-getDecoderName (TRecusrive md) = EName $ T.concat ["decode", _mTypeName md]
-getDecoderName (TDMaybe x _) = (EFuncApp "D.maybe" (getDecoderName x))
+getDecoderName td = let
+  expr = case td of
+    SimpleType ctd -> EName $ T.concat ["decode", getCTDName ctd]
+    Polymorphic _ ctd -> EName $ T.concat ["decode", getCTDName ctd]
+    Primitive n _ -> EName $ getPrimitiveDecoder n
+    List x _ -> EFuncApp (EName "D.list") (getDecoderName x)
+    TRecusrive md -> EFuncApp "D.lazy" $ ELambda $ EName $ T.concat ["decode", _mTypeName md]
+    TDMaybe x _ -> (EFuncApp "D.maybe" (getDecoderName x))
+  in if checkRecursion td
+    then EFuncApp "D.lazy" $ ELambda $ expr
+    else expr
+
+checkRecursion :: TypeDescriptor -> Bool
+checkRecursion td_ = case td_ of
+  SimpleType ctdata -> any id $ checkRecursion <$> getTypeDescriptors ctdata
+  Polymorphic _ ctdata -> any id $ checkRecursion <$> getTypeDescriptors ctdata
+  List td _ -> checkRecursion td
+  TDMaybe td _ -> checkRecursion td
+  Primitive _ _ -> False
+  TRecusrive _ -> True
+  where
+  getTypeDescriptors :: CTData -> [TypeDescriptor]
+  getTypeDescriptors (CTEmpty _) = []
+  getTypeDescriptors (CTData _ ncd) =
+    P.concat $ NE.toList $ NE.map getFromCd ncd
+  getFromCd :: ConstructorDescriptor -> [TypeDescriptor]
+  getFromCd (RecordConstructor _ fds) = NE.toList $ NE.map (\(NamedField _ td) -> td) fds
+  getFromCd (SimpleConstructor _ fds) = NE.toList fds
+  getFromCd (NullaryConstructor _ ) = []
 
 getPrimitiveDecoder :: Text -> Text
 getPrimitiveDecoder "String" = "D.string"
@@ -337,35 +332,76 @@ getPrimitiveEncoder "Bool" = "E.bool"
 getPrimitiveEncoder s = T.concat ["encode", s]
 
 -- | Generate Elm type definitions
-generateElmDef :: TypeDescriptor -> EDec
-generateElmDef (Concrete (CTData tname _ c))
-  = EType tname [] $ generateElmDefC c
-generateElmDef (Concrete (CTEmpty tname _))
-  = EType tname [] EEmpty
-generateElmDef (Polymorphic tvars (CTData tname _ c))
-  = EType tname ((pack . nameToText) <$> tvars) $ generateElmDefC c
-generateElmDef (Polymorphic _targs (CTEmpty tname _))
-  = EType tname undefined EEmpty
-generateElmDef _
-  = error "Not implemented"
+generateElmDef :: TypeDescriptor -> LibM EDec
+generateElmDef td = case td of
+  SimpleType (CTData tname c) -> do
+    defC <- generateElmDefC c
+    pure $ EType (tnHead tname) [] defC
+  SimpleType (CTEmpty tname) -> do
+    pure $ EType (tnHead tname) [] EEmpty
+  Polymorphic tvars (CTData tname c) -> do
+    defC <- generateElmDefC c
+    pure $ EType (tnHead tname) (renderTypeVar <$> tvars) defC
+  Polymorphic _targs (CTEmpty tname) ->
+    pure $ EType (tnHead tname) undefined EEmpty
+  _ -> error "Not implemented"
 
-generateElmDefC :: Constructors -> ECons
-generateElmDefC (SingleConstructor cd) = generateElmDefCD cd
-generateElmDefC (ManyConstructors cdl) = ESum $ NE.toList $ NE.map generateElmDefCD cdl
+generateElmDefC :: Constructors -> LibM ECons
+generateElmDefC cds = do
+  cDefs <- mapM generateElmDefCD $ NE.toList cds
+  pure $ ESum cDefs
 
-generateElmDefCD :: ConstructorDescriptor -> ECons
-generateElmDefCD (RecordConstructor cname nfs)
-  = ERecord cname $ generateRecordFields nfs
-generateElmDefCD (SimpleConstructor cname fs)
-  = EProduct cname $ generateUnNamedFields fs
-generateElmDefCD (NullaryConstructor cname)
-  = ENullary cname
+generateElmDefCD :: ConstructorDescriptor -> LibM ECons
+generateElmDefCD cd = case cd of
+  RecordConstructor cname nfs -> do
+    rfs <- generateRecordFields nfs
+    pure $ ERecord cname rfs
+  SimpleConstructor cname fs -> do
+    rfs <- generateUnNamedFields fs
+    pure $ EProduct cname rfs
+  NullaryConstructor cname -> do
+    pure $ ENullary cname
 
-generateRecordFields :: Fields NamedField -> [ENamedField]
-generateRecordFields (SingleField (NamedField a b)) = [(a, b)]
-generateRecordFields (ManyFields n) =
-  NE.toList $ NE.map (\(NamedField a b) -> (a, b)) n
+generateRecordFields :: Fields NamedField -> LibM [ENamedField]
+generateRecordFields fs = case fs of
+  (nf :| []) -> mapM mapFn [nf]
+  n -> mapM mapFn $ NE.toList n
+  where
+  mapFn :: NamedField -> LibM ENamedField
+  mapFn (NamedField a b) = do
+    t <- mkTypeDisplayFromTd b 
+    pure (a, t)
 
-generateUnNamedFields :: Fields TypeDescriptor -> [TypeDescriptor]
-generateUnNamedFields (SingleField a) = [a]
-generateUnNamedFields (ManyFields a) = NE.toList a
+generateUnNamedFields :: Fields TypeDescriptor -> LibM [TypeDisplay]
+generateUnNamedFields fds = mapM mkTypeDisplayFromTd $ NE.toList fds
+
+mkTypeDisplayFromTd :: TypeDescriptor -> LibM TypeDisplay
+mkTypeDisplayFromTd td = do
+  seen <- ask
+  x <- case getMDataFromTd td of
+    Just md -> case hasPoly <$> (DMS.lookup md seen) of
+      Just True -> pure $ TypeDisplay $ getRenderedName td
+      Just False -> pure $ TypeDisplay $ _mTypeName md
+      Nothing -> pure $ TypeDisplay $ getRenderedName td
+    Nothing -> pure $ TypeDisplay $ getRenderedName td
+  pure x
+
+hasPoly :: [(GenOption, HType)] -> Bool
+hasPoly cl = isJust $ DL.find fn cl
+  where
+  fn :: (GenOption, HType) -> Bool
+  fn (Definiton Poly, _) = True
+  fn (Everything Poly, _) = True
+  fn _ = False
+
+getMDataFromTd :: TypeDescriptor -> Maybe MData
+getMDataFromTd td = case td of
+  SimpleType c -> Just $ getMDataFromCTdata c
+  Polymorphic _ c -> Just $ getMDataFromCTdata c
+  TRecusrive md -> Just md
+  _ -> Nothing
+
+getMDataFromCTdata :: CTData -> MData
+getMDataFromCTdata (CTData tn _) = tnMData tn
+getMDataFromCTdata (CTEmpty tn) = tnMData tn
+

@@ -10,8 +10,8 @@ Generate Elm type definitions and json encoders/decoders from Haskell source.
 
 ### How to use?
 
-To generate Elm code for a Haskell type, the Haskell type needs to have an instance of the `HType` type class.
-This can be automatically derivied, provided all your constructor field types have `HType` instances. A sample can be seen below.
+To generate Elm code for a Haskell type, the Haskell type needs to have an instance of the `ToHType` type class.
+This can be automatically derivied, provided all your constructor field types have `ToHType` instances. A sample can be seen below. Please note that language extensions `DeriveGeneric` and `DeriveAnyClass` should be enabled to make this work.
 
 ```
 {-# Language DeriveGeneric #-}
@@ -70,10 +70,10 @@ main :: IO ()
 main = do
   Data.Text.IO.writeFile "elm-app/src/Autogen.elm" elmSource
 
--- The `generateFor` function accepts an elm version (only Elm19 as of now) and a `Builder` value. The `Builder` is just a `State` monad that aggregate
--- the configuration parameters from the include calls. The first parameter of the include function is a `proxy` value that
--- denotes the type that requires Elm code generation. The second value is a value of type `GenOption` that selects which entites
--- needs to be generation, and also selects if the type generated at Elm should be polymorphic. It is defined as follows.
+-- The `generateFor` function accepts an elm version (only Elm19 as of now), a value of type `Options` from the Aeson library
+-- and a `Builder` value. The `Builder` is just a `State` monad that aggregates the configuration parameters from the include
+-- calls. The first parameter of the include function is a `proxy` value that denotes the type that requires Elm code generation. -- The second value is a value of type `GenOption` that selects which entites needs to be generation, and also selects if the
+-- type generated at Elm should be polymorphic. It is defined as follows.
 
 data GenOption
   = Definiton PolyConfig  -- Generate Type definition in Elm. PolyConfig field decides if the type has to be polymorphic

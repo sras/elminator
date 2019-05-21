@@ -7,20 +7,30 @@
 
 module Elminator.ELM.CodeGen where
 
-import Data.Text as T hiding (foldr)
-import qualified Data.List as DL
 import Control.Monad.State.Lazy
+import qualified Data.List as DL
 import Data.String
+import Data.Text as T hiding (foldr)
 
 type CurrentPos = Int
+
 type CurrentIndent = Int
 
 type RenderM = State (CurrentIndent, CurrentPos, Text)
 
 renderElm :: ElmSrc -> Text
-renderElm (ElmSrc decs) = let
-  (_, _, srcs) = execState (mapM_ (\x -> do renderElmDec x; renderNL; renderNL;resetIndent) decs) (0, 0, "")
-  in srcs
+renderElm (ElmSrc decs) =
+  let (_, _, srcs) =
+        execState
+          (mapM_
+             (\x -> do
+                renderElmDec x
+                renderNL
+                renderNL
+                resetIndent)
+             decs)
+          (0, 0, "")
+   in srcs
 
 renderText :: Text -> RenderM ()
 renderText t = do
@@ -32,7 +42,11 @@ renderIC _ [] _ = pure ()
 renderIC _ [t] fn = fn t
 renderIC s (t:tx) fn = do
   fn t
-  sequence_ $ (\x -> do; s; fn x;) <$> tx
+  sequence_ $
+    (\x -> do
+       s
+       fn x) <$>
+    tx
 
 renderNL :: RenderM ()
 renderNL = do
@@ -50,15 +64,14 @@ getCP = do
   pure p
 
 setCI :: Int -> RenderM ()
-setCI i =
-  modify (\(_, p, t) -> (i, p, t))
+setCI i = modify (\(_, p, t) -> (i, p, t))
 
 resetIndent :: RenderM ()
 resetIndent = setCI 0
 
 incIndent :: RenderM ()
 incIndent = do
-  modify (\(i, p, t) -> (i+1, p, t))
+  modify (\(i, p, t) -> (i + 1, p, t))
 
 renderCI :: RenderM ()
 renderCI = do
@@ -73,17 +86,19 @@ renderElmDec (EType name targs cons_) = do
   renderCI
   renderText "type"
   renderSpace
-  renderText name 
-  if DL.length targs > 0 then renderSpace  else pure ()
+  renderText name
+  if DL.length targs > 0
+    then renderSpace
+    else pure ()
   renderIC (renderSpace) targs renderText
-  renderSpace 
-  renderText "=" 
-  renderSpace 
+  renderSpace
+  renderText "="
+  renderSpace
   renderCon cons_
   resetIndent
 renderElmDec (EFunc name sig fargs expr) = do
   case sig of
-    Just s -> renderText $ T.concat [name , " : ", s]
+    Just s -> renderText $ T.concat [name, " : ", s]
     Nothing -> pure ()
   renderNL
   renderCI
@@ -95,8 +110,14 @@ renderElmDec (EFunc name sig fargs expr) = do
   incIndent
   renderCI
   renderExp expr
+renderElmDec (EBinding patt expr) = do
+  renderNL
+  renderCI
+  renderPattern patt
+  renderText " = "
+  renderExp expr
 
-renderExp :: EExpr -> RenderM () 
+renderExp :: EExpr -> RenderM ()
 renderExp (ERec fields) = do
   renderText "{"
   renderIC (renderText ", ") fields renderField
@@ -112,7 +133,11 @@ renderExp (ELet decs exp_) = do
   renderText $ "let"
   setCI $ p + 1
   i <- getCI
-  renderIC (do;renderNL;renderCI) decs renderElmDec
+  renderIC
+    (do renderNL
+        renderCI)
+    decs
+    renderElmDec
   renderNL
   setCI (i - 1)
   renderCI
@@ -130,7 +155,11 @@ renderExp (ECase expr branches) = do
   renderNL
   setCI (si + 1)
   renderCI
-  renderIC (do;renderNL;renderCI) branches renderCaseBranch
+  renderIC
+    (do renderNL
+        renderCI)
+    branches
+    renderCaseBranch
 renderExp (EFuncApp expr1 expr2) = do
   renderExp expr1
   renderSpace
@@ -151,7 +180,13 @@ renderExp (EList l) = do
   i <- getCI
   p <- getCP
   renderText "[ "
-  renderIC (do;renderNL; setCI p; renderCI; renderText ", ") l renderExp
+  renderIC
+    (do renderNL
+        setCI p
+        renderCI
+        renderText ", ")
+    l
+    renderExp
   renderText "]"
   setCI i
 renderExp (ELiteral l) = renderLiteral l
@@ -178,6 +213,14 @@ renderPattern :: EPattern -> RenderM ()
 renderPattern (EVarP x) = renderText x
 renderPattern (ELitP x) = renderLiteral x
 renderPattern EWildP = renderText "_"
+renderPattern (ETupleP ps) = do
+  renderText "("
+  renderIC (renderText ",") ps renderPattern
+  renderText ")"
+renderPattern (EListP ps) = do
+  renderText "["
+  renderIC (renderText ",") ps renderPattern
+  renderText "]"
 renderPattern (EConsP name patterns) = do
   renderText name
   renderSpace
@@ -190,12 +233,12 @@ renderCon :: ECons -> RenderM ()
 renderCon (ERecord cname fds) = do
   renderText cname
   renderText " { "
-  renderIC (renderText ", ") fds (renderText.renderNamedField)
+  renderIC (renderText ", ") fds (renderText . renderNamedField)
   renderText " } "
 renderCon (EProduct cname fds) = do
   renderText cname
   renderSpace
-  renderIC (renderText " ") (fds) (renderText.renderType)
+  renderIC (renderText " ") (fds) (renderText . renderType)
 renderCon (ESum cons_) = renderIC (renderText " | ") cons_ renderCon
 renderCon (ENullary con) = renderText con
 renderCon EEmpty = renderText ""
@@ -204,9 +247,7 @@ renderType :: TypeDisplay -> Text
 renderType (TypeDisplay x) = x
 
 renderNamedField :: ENamedField -> Text
-renderNamedField (name, td) = T.concat [ name, " : ", renderType td]
-
-
+renderNamedField (name, td) = T.concat [name, " : ", renderType td]
 
 -- | Elm code gen
 type TArg = Text
@@ -215,13 +256,14 @@ type FArg = Text
 
 type FSig = Maybe Text
 
-data ElmSrc = ElmSrc [EDec]
+data ElmSrc =
+  ElmSrc [EDec]
 
 data EDec
   = EFunc Text FSig [FArg] EExpr
   | EType Text [TArg] ECons
+  | EBinding EPattern EExpr
   deriving (Show, Eq)
-
 
 data ECons
   = ERecord Text [ENamedField]
@@ -231,10 +273,11 @@ data ECons
   | EEmpty
   deriving (Show, Eq)
 
-data TypeDisplay = TypeDisplay Text deriving (Show, Eq)
+data TypeDisplay =
+  TypeDisplay Text
+  deriving (Show, Eq)
 
-type ENamedField
-  = (Text, TypeDisplay)
+type ENamedField = (Text, TypeDisplay)
 
 data EExpr
   = ECase EExpr [ECaseBranch]
@@ -250,26 +293,24 @@ data EExpr
   deriving (Eq, Show)
 
 instance IsString EExpr where
-  fromString = (EName).pack
-  
+  fromString = (EName) . pack
 
 type EField = (Text, EExpr)
 
-type EBinding
-  = (EPattern, EExpr)
+type EBinding = (EPattern, EExpr)
 
 data ELit
   = EStringL String
   | EIntL Int
   deriving (Eq, Show)
 
-type ECaseBranch
-  = (EPattern, EExpr)
+type ECaseBranch = (EPattern, EExpr)
 
 data EPattern
   = EVarP Text
   | EConsP Text [EPattern]
   | ELitP ELit
+  | ETupleP [EPattern]
+  | EListP [EPattern]
   | EWildP
   deriving (Eq, Show)
-

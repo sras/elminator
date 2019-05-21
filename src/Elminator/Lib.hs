@@ -107,10 +107,6 @@ data NamedField =
 getCTDName :: CTData -> Text
 getCTDName (CTData a _) = tnHead a
 getCTDName _ = error "Unimpl"
-    -- HUDef (UDefData (MData MyWeirdType ..) [HType Int, HType String, HType Float] Nothing
-      --[HConstructor C1 [HField Nothing (HType of (Maybe (Either Int Int)))], HConstructor C2 [..]])])
-    -- HUDef (UDefData (MData MyWeirdType ..) [HType Int, HType String, HType Float] Nothing
-      --[HConstructor C1 [HField Nothing (HType of (Maybe (Either (HTypeVar a) Int)))], HConstructor C2 [..]])])
 
 -- Takes an HType, refies the corresponding
 -- type using template haskell, and inserts type arguments
@@ -128,11 +124,15 @@ getCTDName _ = error "Unimpl"
 -- The HType of this type will be something like
 --
 -- HUDef (UDefData (MData MyWeirdType2..) [
+--     HUDef (UDefData (MData MyWeirdType ..) [HType Int, HType String, HType Float] Nothing
+--       [HConstructor C1 [HField Nothing (HType of (Maybe (Either Int Int)))], HConstructor C2 [..]])])
 --
 --This function walks this tree of HTypes and overwrites the HTypes that comes at a type variable location
 --with a HTypeVar value. So the Htype returned would be something like
 --
 -- HUDef (UDefData (MData MyWeirdType2..) [
+--     HUDef (UDefData (MData MyWeirdType ..) [HType Int, HType String, HType Float] Nothing
+--       [HConstructor C1 [HField Nothing (HType of (Maybe (Either (HTypeVar a) Int)))], HConstructor C2 [..]])])
 --Thus leaving the rest of the information in the HType value (including the concrete types this type was initialized with) alone.
 mkPolyMorphic :: HType -> LibM HType
 mkPolyMorphic _htype@(HUDef (UDefData (MData tnString a b) targs _ hcons)) = do

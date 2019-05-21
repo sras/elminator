@@ -14,7 +14,7 @@ Generate Elm type definitions and json encoders/decoders from Haskell source.
 To generate Elm code for a Haskell type, the Haskell type needs to have an instance of the `ToHType` type class.
 This can be automatically derivied, provided all your constructor field types have `ToHType` instances. A sample can be seen below. Please note that language extensions `DeriveGeneric` and `DeriveAnyClass` should be enabled to make this work.
 
-```
+```haskell
 {-# Language DeriveGeneric #-}
 {-# Language DeriveAnyClass #-}
 
@@ -31,7 +31,7 @@ Since this library uses template haskell to look up type information (in additio
 A usage sample can be seen in the following code used in the round trip tests for this library.
 
 
-```
+```haskell
 {-# Language OverloadedStrings #-}
 {-# Language TemplateHaskell #-}
 
@@ -45,7 +45,7 @@ import Data.Text
 import Lib
 
 elmSource :: Text
-elmSource = $(generateFor Elm19 myDefaultOptions $ do
+elmSource = $(generateFor Elm19 myDefaultOptions (Just "elm-app/src/Autogen.elm") $ do
   include (Proxy :: Proxy SingleCon) $ Everything Mono
   include (Proxy :: Proxy SingleRecCon) $ Everything Mono
   include (Proxy :: Proxy SingleConOneField)$ Everything Mono
@@ -72,15 +72,15 @@ elmSource = $(generateFor Elm19 myDefaultOptions $ do
   include (Proxy :: Proxy NestedTuples) $ Everything Mono
   include (Proxy :: Proxy (TypeWithExt ())) $ Everything Poly
   include (Proxy :: Proxy (WithEmptyTuple ())) $ Everything Poly
+  include (Proxy :: Proxy (Phantom2 ())) $ Everything Poly
+  include (Proxy :: Proxy PhantomWrapper) $ Everything Poly
   )
 
-main :: IO ()
-main = do
-  Data.Text.IO.writeFile "elm-app/src/Autogen.elm" elmSource
-
 -- The `generateFor` function accepts an elm version (only Elm19 as of now), a value of type `Options` from the Aeson library
--- and a `Builder` value. The `Builder` is just a `State` monad that aggregates the configuration parameters from the include
--- calls. The first parameter of the include function is a `proxy` value that denotes the type that requires Elm code generation. -- The second value is a value of type `GenOption` that selects which entites needs to be generation, and also selects if the
+-- , and optional `FilePath` to which the generated source will be written to, and a `Builder` value.
+-- The `Builder` is just a `State` monad that aggregates the configuration parameters from the include
+-- calls. The first parameter of the include function is a `proxy` value that denotes the type that requires Elm code generation.
+-- The second value is a value of type `GenOption` that selects which entites needs to be generation, and also selects if the
 -- type generated at Elm should be polymorphic. It is defined as follows.
 
 data GenOption
@@ -101,7 +101,7 @@ This feature basically allows you to define the Elm type and encoders/decoders y
 
 To use this, derive the `ToHType` instance for the type using the `HExternal` constructor of the `HType` type. Sample code can be seen below, where we define a `ToHType` instance for a type called `MyExtType`.
 
-```
+```haskell
 instance (ToHType a, ToHType b) => ToHType (MyExtType a b) where
   toHType _ = do
     ha <- toHType (Proxy :: Proxy a)

@@ -26,10 +26,12 @@ import Data.List as DL
 import qualified Data.Map.Strict as DMS
 import Data.Proxy
 import Data.Text as T
+import Data.Text.IO as T
 import qualified Elminator.Elm19 as Elm19
 import Elminator.Generics.Simple
 import Elminator.Lib
 import Language.Haskell.TH
+import System.IO (FilePath)
 
 -- | Include the elm source for the Haskell type specified by the proxy argument.
 -- The second argument decides which components will be included and if the
@@ -49,15 +51,18 @@ include p dc = do
   s <- get
   put $ DMS.insertWith (++) mdata [(dc, hType)] s
 
-generateFor :: ElmVersion -> Options -> Builder -> Q Exp
-generateFor ev opt sc =
+generateFor :: ElmVersion -> Options -> (Maybe FilePath) -> Builder -> Q Exp
+generateFor ev opt mfp sc =
   let (_, gc) = runState sc DMS.empty
       r = do
         srcs <- mapM generateOne $ DMS.elems gc
         pure $ T.intercalate "" srcs
    in do (exprtxt, exinfo) <- runReaderT (runWriterT r) gc
-         pure $
-           toExp $ T.concat [Elm19.elmFront $ toImport exinfo, "\n\n", exprtxt]
+         let fSrc = T.concat [Elm19.elmFront $ toImport exinfo, "\n\n", exprtxt]
+         case mfp of
+           Just fp -> runIO $ T.writeFile fp fSrc
+           Nothing -> pure ()
+         pure $ toExp fSrc
   where
     toImport :: [ExItem] -> Text
     toImport exs =

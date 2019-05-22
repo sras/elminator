@@ -1,6 +1,32 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Elminator.Lib where
+module Elminator.Lib
+  ( TypeDescriptor(..)
+  , PolyConfig(..)
+  , GenOption(..)
+  , LibM
+  , CTData(..)
+  , Fields
+  , Decoder(..)
+  , ConName
+  , ConTag
+  , ContentDecoder(..)
+  , FieldName
+  , FieldTag
+  , ConstructorDescriptor(..)
+  , NamedField(..)
+  , Constructors
+  , toTypeDescriptor
+  , mkPolyMorphic
+  , collectExtRefs
+  , typeDescriptorToDecoder
+  , TypeName(..)
+  , getCTDName
+  , renderTypeVar
+  , getRenderedName
+  , Builder
+  , ElmVersion(..)
+  ) where
 
 import Control.Monad.Reader as R
 import Control.Monad.State.Lazy
@@ -215,9 +241,6 @@ mkPolyMorphic _htype@(HUDef (UDefData (MData tnString a b) targs _ hcons)) = do
         (RecC _ args) -> (\(_, _, x) -> x) <$> args
         _ -> error "Not implemented"
 mkPolyMorphic _ = error "Not implemented"
-
-dropPackagePrefix :: String -> String
-dropPackagePrefix x = DL.reverse $ DL.takeWhile (/= '.') $ DL.reverse x
 
 getConstructors :: Info -> [Con]
 getConstructors info =

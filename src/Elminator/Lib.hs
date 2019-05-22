@@ -68,8 +68,8 @@ data ElmVersion =
 data TypeDescriptor
   = SimpleType CTData
   | Polymorphic [TypeVar] CTData
-  | List TypeDescriptor Text
-  | TDMaybe TypeDescriptor Text
+  | List TypeDescriptor
+  | TDMaybe TypeDescriptor
   | Primitive Text Text
   | TRecusrive MData
   | TExternal ExInfo TypeName
@@ -301,8 +301,8 @@ toTypeDescriptor ht@(HUDef (UDefData mdata@(MData tnString _ _) _ _ x)) =
           toConstructors (a :| as)
 toTypeDescriptor ht@(HPrimitive (MData tnString _ _)) =
   Primitive tnString (renderHType ht)
-toTypeDescriptor a@(HList t) = List (toTypeDescriptor t) (renderHType a)
-toTypeDescriptor a@(HMaybe t) = TDMaybe (toTypeDescriptor t) (renderHType a)
+toTypeDescriptor (HList t) = List (toTypeDescriptor t)
+toTypeDescriptor (HMaybe t) = TDMaybe (toTypeDescriptor t)
 toTypeDescriptor (HRecursive md) = TRecusrive $ md
 toTypeDescriptor ht@(HExternal ei _) =
   let rendered = (renderHType $ HExternal ei [])
@@ -340,8 +340,8 @@ mkUnNamedField (HField _ htype) = toTypeDescriptor htype
 getRenderedName :: TypeDescriptor -> Text
 getRenderedName (SimpleType c) = getRenderedNameFromCTdata c
 getRenderedName (Polymorphic _ c) = getRenderedNameFromCTdata c
-getRenderedName (List _ c) = c
-getRenderedName (TDMaybe _ c) = c
+getRenderedName (List h) = T.concat ["(List ", getRenderedName h, ")"]
+getRenderedName (TDMaybe h) = T.concat ["(Maybe ", getRenderedName h, ")"]
 getRenderedName (Primitive _ c) = c
 getRenderedName (TRecusrive md) = _mTypeName md
 getRenderedName (TExternal _ x) = tnPhantom x
@@ -423,8 +423,8 @@ collectExtRefs (SimpleType (CTData _ cons_)) =
   mapM_ collectExtRefs $ getConstructorsFields cons_
 collectExtRefs (Polymorphic _ (CTData _ cons_)) =
   mapM_ collectExtRefs $ getConstructorsFields cons_
-collectExtRefs (List td _) = collectExtRefs td
-collectExtRefs (TDMaybe td _) = collectExtRefs td
+collectExtRefs (List td) = collectExtRefs td
+collectExtRefs (TDMaybe td) = collectExtRefs td
 collectExtRefs (Primitive _ _) = pure ()
 collectExtRefs (TRecusrive _) = pure ()
 collectExtRefs _ = pure ()

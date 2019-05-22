@@ -228,7 +228,7 @@ contentDecoderToExp mcntFname cname cd =
     mapFn :: (FieldName, FieldTag, TypeDescriptor) -> EExpr
     mapFn (_, ft, td) =
       case td of
-        TDMaybe wtd _ ->
+        TDMaybe wtd ->
           EFuncApp
             "D.maybe"
             (EFuncApp
@@ -425,9 +425,8 @@ getEncoderExpr _ (Polymorphic _ ctd) =
     Just _ -> error "Not implemented"
     Nothing -> EName $ T.concat ["encode", getCTDName ctd]
 getEncoderExpr _ (Primitive n _) = EName $ getPrimitiveEncoder n
-getEncoderExpr idx (List x _) = (EFuncApp "E.list" (getEncoderExpr idx x))
-getEncoderExpr idx (TDMaybe x _) =
-  (EFuncApp "encodeMaybe" (getEncoderExpr idx x))
+getEncoderExpr idx (List x) = (EFuncApp "E.list" (getEncoderExpr idx x))
+getEncoderExpr idx (TDMaybe x) = (EFuncApp "encodeMaybe" (getEncoderExpr idx x))
 getEncoderExpr _ (TRecusrive md) = EName $ T.concat ["encode", _mTypeName md]
 getEncoderExpr _ (TExternal (ExInfo _ (Just ei) _) _) =
   EName $ T.concat [extSymbol ei]
@@ -458,11 +457,11 @@ getDecoderExpr idx td =
               Just c -> EName $ T.concat ["decodeTuple", pack $ show $ c]
               Nothing -> EName $ T.concat ["decode", getCTDName ctd]
           Primitive n _ -> EName $ getPrimitiveDecoder n
-          List x _ -> EFuncApp (EName "D.list") (getDecoderExpr idx x)
+          List x -> EFuncApp (EName "D.list") (getDecoderExpr idx x)
           TRecusrive md ->
             EFuncApp "D.lazy" $
             ELambda $ EName $ T.concat ["decode", _mTypeName md]
-          TDMaybe x _ -> (EFuncApp "D.maybe" (getDecoderExpr idx x))
+          TDMaybe x -> (EFuncApp "D.maybe" (getDecoderExpr idx x))
           (TExternal (ExInfo _ _ (Just ei)) _) ->
             EName $ T.concat [extSymbol ei]
           (TExternal (ExInfo _ _ _) _) -> error "Decoder not found"
@@ -477,8 +476,8 @@ checkRecursion td_ =
     SimpleType ctdata -> any id $ checkRecursion <$> getTypeDescriptors ctdata
     Polymorphic _ ctdata ->
       any id $ checkRecursion <$> getTypeDescriptors ctdata
-    List td _ -> checkRecursion td
-    TDMaybe td _ -> checkRecursion td
+    List td -> checkRecursion td
+    TDMaybe td -> checkRecursion td
     Primitive _ _ -> False
     TRecusrive _ -> True
     TExternal _ _ -> False

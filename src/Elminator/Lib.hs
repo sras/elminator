@@ -144,22 +144,21 @@ toTypeDescriptor (HUDef udata) =
     UDefData mdata@(MData tnString _ _) targs hcons -> do
       tdArgs <- mapM toTypeDescriptor targs
       case isTuple tnString of
-        Just _ -> do
-          pure $ TTuple tdArgs
+        Just _ -> pure $ TTuple tdArgs
         Nothing -> do
           (tVars, cnstrs) <- getInfo tnString
           case hcons of
             [] -> pure $ TEmpty mdata (Phantom <$> tVars) tdArgs
             (c:cs) -> do
               rawCons <-
-                do h <- (mkTdConstructor c)
-                   t <- (mapM mkTdConstructor cs)
+                do h <- mkTdConstructor c
+                   t <- mapM mkTdConstructor cs
                    pure $ h :| t
               let reifyInfo = ReifyInfo (mkTypeArg cnstrs <$> tVars) cnstrs
               pure $ TOccupied mdata reifyInfo tdArgs rawCons
 toTypeDescriptor (HPrimitive md) = pure $ TPrimitive md
-toTypeDescriptor (HList ht) = TList <$> (toTypeDescriptor ht)
-toTypeDescriptor (HMaybe ht) = TMaybe <$> (toTypeDescriptor ht)
+toTypeDescriptor (HList ht) = TList <$> toTypeDescriptor ht
+toTypeDescriptor (HMaybe ht) = TMaybe <$> toTypeDescriptor ht
 toTypeDescriptor (HRecursive m) = pure $ TRecusrive m
 toTypeDescriptor (HExternal e hts) = do
   tds <- mapM toTypeDescriptor hts
@@ -171,7 +170,7 @@ mkTdConstructor hc =
     HConstructor (CName cname) fields ->
       case fields of
         [] -> pure $ NullaryConstructor cname
-        hfields@((HField (Just _) _):_) ->
+        hfields@(HField (Just _) _:_) ->
           let mapFn :: HField -> LibM (Text, TypeDescriptor)
               mapFn (HField Nothing _) = error "Unexpected unnamed field"
               mapFn (HField (Just n) x) = do
@@ -179,7 +178,7 @@ mkTdConstructor hc =
                 pure (n, td)
            in do a <- mapM mapFn hfields
                  pure $ RecordConstructor cname $ NE.fromList a
-        hfields@((HField _ _):_) ->
+        hfields@(HField _ _:_) ->
           let mapFn :: HField -> LibM TypeDescriptor
               mapFn (HField _ td) = toTypeDescriptor td
            in do a <- mapM mapFn hfields
@@ -187,17 +186,16 @@ mkTdConstructor hc =
 
 mkTypeArg :: [Con] -> Name -> TypeVar
 mkTypeArg constrs name =
-  if DL.any id $ searchCon name <$> constrs
+  if or $ searchCon name <$> constrs
     then Used name
     else Phantom name
 
 searchCon :: Name -> Con -> Bool
-searchCon name con = DL.any id $ searchType name <$> (getConstructorFields con)
+searchCon name con = DL.or $ searchType name <$> getConstructorFields con
   where
     searchType :: Name -> Type -> Bool
     searchType name_ (VarT n) = name_ == n
-    searchType name_ (AppT t1 t2) =
-      (searchType name_ t1) || (searchType name_ t2)
+    searchType name_ (AppT t1 t2) = searchType name_ t1 || searchType name_ t2
     searchType _ _ = False
 
 getConstructorFields :: Con -> [Type]
@@ -333,7 +331,7 @@ renderTypeVar (Phantom tv) = pack $ nameToText tv
 typeDescriptorToDecoder :: Options -> TypeDescriptor -> Decoder
 typeDescriptorToDecoder opts td =
   case td of
-    TEmpty _ _ _ -> error "Cannot make decoder for Empty type"
+    TEmpty {} -> error "Cannot make decoder for Empty type"
     TOccupied _ _ _ cnstrs -> gdConstructor cnstrs opts
     _ -> error "Cannot only make decoders for user defined types"
 
@@ -341,7 +339,7 @@ gdConstructor :: Constructors -> Options -> Decoder
 gdConstructor (cd :| []) opts =
   if tagSingleConstructors opts
     then gdTaggedWithConstructor [cd] opts
-    else DUntagged $ [(getCName cd, mkContentDecoder cd opts)]
+    else DUntagged [(getCName cd, mkContentDecoder cd opts)]
 gdConstructor cds opts = gdTaggedWithConstructor (NE.toList cds) opts
 
 gdTaggedWithConstructor :: [ConstructorDescriptor] -> Options -> Decoder
@@ -375,13 +373,12 @@ mkContentDecoder cd opts =
     RecordConstructor _cname nf ->
       CDRecord $ NE.toList $ NE.map modifyFieldLabel nf
     SimpleConstructor _cname (f :| []) -> CDRaw f
-    SimpleConstructor _cname f -> CDList $ NE.toList $ f
+    SimpleConstructor _cname f -> CDList $ NE.toList f
     NullaryConstructor _ -> CDEmpty
   where
     modifyFieldLabel ::
          (Text, TypeDescriptor) -> (FieldName, FieldTag, TypeDescriptor)
-    modifyFieldLabel (a, b) =
-      (a, pack $ fieldLabelModifier opts $ unpack $ a, b)
+    modifyFieldLabel (a, b) = (a, pack $ fieldLabelModifier opts $ unpack a, b)
 
 getCName :: ConstructorDescriptor -> Text
 getCName (RecordConstructor x _) = x
@@ -405,8 +402,7 @@ getConstructorsFields nec =
   DL.concat $ NE.toList $ NE.map getConstructorFields_ nec
 
 getConstructorFields_ :: ConstructorDescriptor -> [TypeDescriptor]
-getConstructorFields_ (RecordConstructor _ nef) =
-  (\(_, td) -> td) <$> NE.toList nef
+getConstructorFields_ (RecordConstructor _ nef) = snd <$> NE.toList nef
 getConstructorFields_ (SimpleConstructor _ f) = NE.toList f
 getConstructorFields_ (NullaryConstructor _) = []
 

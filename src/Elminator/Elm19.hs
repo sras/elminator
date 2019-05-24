@@ -48,23 +48,23 @@ generateTupleEncoder idx types =
   EFunc (T.concat ["encodeTuple", pack $ show idx]) Nothing [tlVar] $
   ELet [EBinding (ETupleP patterns) (EName tlVar)] eexpr
   where
-    tlVar = T.concat ["a", pack $ show $ idx, "1"]
+    tlVar = T.concat ["a", pack $ show idx, "1"]
     indexVar :: Int -> Text
-    indexVar y = T.concat ["b", pack $ show $ idx, "_", pack $ show y]
+    indexVar y = T.concat ["b", pack $ show idx, "_", pack $ show y]
     varList :: [Text]
-    varList = (zipWith (\_ y -> indexVar y) types [1 ..])
+    varList = zipWith (\_ y -> indexVar y) types [1 ..]
     patterns = EVarP <$> varList
     eexpr =
       EFuncApp (EFuncApp "E.list" "identity") $
       EList $
       zipWith
-        (\x i -> (EFuncApp (getEncoderExpr (idx + 1) x) (EName $ indexVar i)))
+        (\x i -> EFuncApp (getEncoderExpr (idx + 1) x) (EName $ indexVar i))
         types
         [1 ..]
 
 generateTupleDecoder :: Int -> [TypeDescriptor] -> EDec
 generateTupleDecoder nidx types =
-  EFunc (T.concat ["decodeTuple", pack $ show $ nidx]) Nothing [] $
+  EFunc (T.concat ["decodeTuple", pack $ show nidx]) Nothing [] $
   ELet [mkTupleMaker mktName nidx types] $
   aggregateDecoders mktName $
   zipWith
@@ -105,7 +105,7 @@ generateElm d h opts = do
         encSrc <- generateEncoder (td, decoder)
         decSrc <- generateDecoder (td, decoder)
         pure $ ElmSrc [encSrc, decSrc]
-  pure $ renderElm $ src
+  pure $ renderElm src
 
 generateDecoder :: (TypeDescriptor, Decoder) -> LibM EDec
 generateDecoder (td, decoder) = do
@@ -135,7 +135,7 @@ decoderToDecoderEExpr d =
     DUnderConKey cds ->
       EFuncApp
         "D.oneOf"
-        (EList $ zipWith decodeUnderConKey cds ((prependMk . firstOf3) <$> cds))
+        (EList $ zipWith decodeUnderConKey cds (prependMk . firstOf3 <$> cds))
     DTagged tfn cfn cds ->
       let expr =
             EFuncApp
@@ -156,9 +156,7 @@ decoderToDecoderEExpr d =
               (EFuncApp (EFuncApp "D.index" (ELiteral $ EIntL 0)) "D.string")
        in ELet [mkTryCons Nothing cds] expr
     DUntagged cds ->
-      EFuncApp
-        "D.oneOf"
-        (EList $ (\(cname, cd) -> contentDecoderToExp Nothing cname cd) <$> cds)
+      EFuncApp "D.oneOf" (EList $ uncurry (contentDecoderToExp Nothing) <$> cds)
 
 mkTryCons :: Maybe Text -> [(ConName, ConTag, ContentDecoder)] -> EDec
 mkTryCons mcntFname cds =
@@ -169,24 +167,24 @@ mkTryCons mcntFname cds =
       , EFuncApp "D.fail" (ELiteral $ EStringL "None of the constructors match"))
     fn1 :: (ConName, ConTag, ContentDecoder) -> ECaseBranch
     fn1 (cname, ctag, cd) =
-      let pattern = ELitP (EStringL $ unpack $ ctag)
+      let pat = ELitP (EStringL $ unpack ctag)
           expression = contentDecoderToExp mcntFname cname cd
-       in (pattern, expression)
+       in (pat, expression)
 
 decodeUnderConKey :: (ConName, ConTag, ContentDecoder) -> Text -> EExpr
 decodeUnderConKey (cname, ctag, cd) _ =
-  EFuncApp (EFuncApp "D.field" (ELiteral $ EStringL $ unpack $ ctag)) $
+  EFuncApp (EFuncApp "D.field" (ELiteral $ EStringL $ unpack ctag)) $
   contentDecoderToExp Nothing cname cd
 
 contentDecoderToExp :: Maybe Text -> ConName -> ContentDecoder -> EExpr
 contentDecoderToExp mcntFname cname cd =
   case cd of
     CDRecord nfds ->
-      let makerFnName = (prependMk cname)
+      let makerFnName = prependMk cname
           makerFn = mkRecorderMaker makerFnName cname nfds
        in ELet [makerFn] $ aggregateDecoders makerFnName $ mapFn <$> nfds
     CDRecordRaw nfd@(_, _, td) ->
-      let makerFnName = (prependMk cname)
+      let makerFnName = prependMk cname
           makerFn = mkRecorderMaker makerFnName cname [nfd]
        in ELet [makerFn] $ aggregateDecoders makerFnName [getDecoderExpr 0 td]
     CDList tds ->
@@ -240,11 +238,11 @@ aggregateDecoders mfn exprs =
                     then pack $ show field8L
                     else ""
                 ])
-             (EName mfn)) $
-        field8
+             (EName mfn))
+          field8
    in if fieldCount < 9
         then decU8
-        else DL.foldl' (\a v -> EFuncApp ((EFuncApp "seqApp") a) v) decU8 $
+        else DL.foldl' (\a v -> EFuncApp (EFuncApp "seqApp" a) v) decU8 $
              DL.drop 8 exprs
 
 mkRecorderMaker ::
@@ -261,7 +259,7 @@ mkTupleMaker :: Text -> Int -> [TypeDescriptor] -> EDec
 mkTupleMaker tmName idx fds =
   let args =
         zipWith
-          (\_ y -> T.concat ["a", pack $ show $ idx, "_", pack $ show y])
+          (\_ y -> T.concat ["a", pack $ show idx, "_", pack $ show y])
           fds
           [(1 :: Int) ..]
    in EFunc tmName Nothing args $ ETuple (EName <$> args)
@@ -280,7 +278,7 @@ generateEncoder (td, decoder) = do
         (T.concat ["encode", tname])
         (Just $ T.concat [tdisp, " -> ", "E.Value"])
         ["a"] $
-      decoderToEncoderEExpr $ decoder
+      decoderToEncoderEExpr decoder
 
 decoderToEncoderEExpr :: Decoder -> EExpr
 decoderToEncoderEExpr d =
@@ -298,7 +296,7 @@ decoderToEncoderEExpr d =
       ( makePattern a
       , EFuncApp (EFuncApp "E.list" "identity") $
         EList
-          [ EFuncApp "E.string" $ ELiteral $ EStringL $ unpack $ ctag
+          [ EFuncApp "E.string" $ ELiteral $ EStringL $ unpack ctag
           , contentDecoderToEncoderExp Nothing cd
           ])
     mapFn2 :: Text -> Text -> (ConName, ConTag, ContentDecoder) -> ECaseBranch
@@ -308,8 +306,8 @@ decoderToEncoderEExpr d =
     makePattern :: (ConName, ConTag, ContentDecoder) -> EPattern
     makePattern (cname, _, cd) =
       case cd of
-        CDRecord _ -> EConsP cname $ [EVarP "x"]
-        CDRecordRaw _ -> EConsP cname $ [EVarP "x"]
+        CDRecord _ -> EConsP cname [EVarP "x"]
+        CDRecordRaw _ -> EConsP cname [EVarP "x"]
         CDList tds ->
           EConsP cname $
           zipWith
@@ -336,16 +334,16 @@ encoderTagged tfn cfn (_, ctag, cd) =
     CDRecordRaw _ -> contentDecoderToEncoderExp Nothing cd
     _ ->
       EFuncApp "E.object" $
-      EList $
-      [ ETuple
-          [ ELiteral $ EStringL $ unpack $ tfn
-          , EFuncApp "E.string" $ ELiteral $ EStringL $ unpack $ ctag
-          ]
-      , ETuple
-          [ ELiteral $ EStringL $ unpack $ cfn
-          , contentDecoderToEncoderExp Nothing cd
-          ]
-      ]
+      EList
+        [ ETuple
+            [ ELiteral $ EStringL $ unpack tfn
+            , EFuncApp "E.string" $ ELiteral $ EStringL $ unpack ctag
+            ]
+        , ETuple
+            [ ELiteral $ EStringL $ unpack cfn
+            , contentDecoderToEncoderExp Nothing cd
+            ]
+        ]
 
 contentDecoderToEncoderExp ::
      Maybe (FieldName, ConTag) -> ContentDecoder -> EExpr
@@ -354,13 +352,13 @@ contentDecoderToEncoderExp mct cd =
     CDRecord fds ->
       EFuncApp "E.object" $
       case mct of
-        Nothing -> EList $ (mapFn <$> fds)
+        Nothing -> EList (mapFn <$> fds)
         Just (tn, ctag) ->
           let x =
-                (ETuple
-                   [ ELiteral $ EStringL $ unpack tn
-                   , EFuncApp "E.string" $ ELiteral $ EStringL $ unpack $ ctag
-                   ])
+                ETuple
+                  [ ELiteral $ EStringL $ unpack tn
+                  , EFuncApp "E.string" $ ELiteral $ EStringL $ unpack ctag
+                  ]
            in EList $ x : (mapFn <$> fds)
     CDRecordRaw (fn, _, td) ->
       EFuncApp (getEncoderExpr 0 td) $ EName $ T.concat ["x", ".", fn]
@@ -390,25 +388,25 @@ getEncoderExpr idx (TTuple tds) =
 getEncoderExpr _ (TOccupied md _ _ _) =
   EName $ T.concat ["encode", _mTypeName md]
 getEncoderExpr _ (TPrimitive n) = EName $ getPrimitiveEncoder $ _mTypeName n
-getEncoderExpr idx (TList x) = (EFuncApp "E.list" (getEncoderExpr idx x))
-getEncoderExpr idx (TMaybe x) = (EFuncApp "encodeMaybe" (getEncoderExpr idx x))
+getEncoderExpr idx (TList x) = EFuncApp "E.list" (getEncoderExpr idx x)
+getEncoderExpr idx (TMaybe x) = EFuncApp "encodeMaybe" (getEncoderExpr idx x)
 getEncoderExpr _ (TRecusrive md) = EName $ T.concat ["encode", _mTypeName md]
 getEncoderExpr _ (TExternal (ExInfo _ (Just ei) _) _) =
   EName $ T.concat [extSymbol ei]
-getEncoderExpr _ (TExternal (ExInfo _ _ _) _) = error "Encoder not found"
+getEncoderExpr _ (TExternal (ExInfo {}) _) = error "Encoder not found"
 getEncoderExpr _ _ = error "Encoder not found"
 
 getDecoderExpr :: Int -> TypeDescriptor -> EExpr
 getDecoderExpr idx td =
   let expr =
         case td of
-          TEmpty _ _ _ -> error "Cannot decode empty types"
+          TEmpty {} -> error "Cannot decode empty types"
           TTuple tds ->
             case tds of
               [] -> EFuncApp "D.succeed" "()"
               (_:_) ->
                 ELet [generateTupleDecoder idx tds] $
-                EName $ T.concat ["decodeTuple", pack $ show $ idx]
+                EName $ T.concat ["decodeTuple", pack $ show idx]
           TOccupied md _ _ _ -> EName $ T.concat ["decode", _mTypeName md]
           TPrimitive n -> EName $ getPrimitiveDecoder $ _mTypeName n
           TList x -> EFuncApp (EName "D.list") (getDecoderExpr idx x)
@@ -416,31 +414,28 @@ getDecoderExpr idx td =
             EFuncApp "D.lazy" $
             ELambda $ EName $ T.concat ["decode", _mTypeName md]
           TMaybe x -> (EFuncApp "D.maybe" (getDecoderExpr idx x))
-          (TExternal (ExInfo _ _ (Just ei)) _) ->
-            EName $ T.concat [extSymbol ei]
-          (TExternal (ExInfo _ _ _) _) -> error "Decoder not found"
+          TExternal (ExInfo _ _ (Just ei)) _ -> EName $ T.concat [extSymbol ei]
+          TExternal ExInfo {} _ -> error "Decoder not found"
    in if checkRecursion td
-        then EFuncApp "D.lazy" $ ELambda $ expr
+        then EFuncApp "D.lazy" $ ELambda expr
         else expr
 
 checkRecursion :: TypeDescriptor -> Bool
 checkRecursion td_ =
   case td_ of
-    TOccupied _ _ _ cnstrs ->
-      any id $ checkRecursion <$> getTypeDescriptors cnstrs
+    TOccupied _ _ _ cnstrs -> or $ checkRecursion <$> getTypeDescriptors cnstrs
     TList td -> checkRecursion td
     TMaybe td -> checkRecursion td
     TPrimitive _ -> False
     TRecusrive _ -> True
     TExternal _ _ -> False
-    TTuple tds -> any id $ checkRecursion <$> tds
-    TEmpty _ _ _ -> False
+    TTuple tds -> or $ checkRecursion <$> tds
+    TEmpty {} -> False
   where
     getTypeDescriptors :: Constructors -> [TypeDescriptor]
     getTypeDescriptors ncd = P.concat $ NE.toList $ NE.map getFromCd ncd
     getFromCd :: ConstructorDescriptor -> [TypeDescriptor]
-    getFromCd (RecordConstructor _ fds) =
-      NE.toList $ NE.map (\(_, td) -> td) fds
+    getFromCd (RecordConstructor _ fds) = NE.toList $ NE.map snd fds
     getFromCd (SimpleConstructor _ fds) = NE.toList fds
     getFromCd (NullaryConstructor _) = []
 
@@ -460,7 +455,7 @@ getPrimitiveEncoder s = T.concat ["encode", s]
 
 -- | Generate Elm type definitions
 generateElmDef :: TypeDescriptor -> Bool -> LibM EDec
-generateElmDef td needPoly = do
+generateElmDef td needPoly =
   case td of
     TEmpty (MData a _ _) tvars _ ->
       pure $ EType a (getTypeVars tvars needPoly) EEmpty
@@ -475,7 +470,7 @@ generateElmDef td needPoly = do
 getTypeVars :: [TypeVar] -> Bool -> [Text]
 getTypeVars tds needPoly =
   if needPoly
-    then (renderTypeVar <$> tds)
+    then renderTypeVar <$> tds
     else []
 
 generateElmDecTHCS :: [Con] -> LibM ECons
@@ -485,7 +480,7 @@ generateElmDecTHCS cs = do
 
 generateElmDecTHC :: Con -> LibM ECons
 generateElmDecTHC (NormalC n tx) = do
-  ds <- mapM (\(_, t) -> wrapInPara <$> (renderTHType t)) tx
+  ds <- mapM (\(_, t) -> wrapInPara <$> renderTHType t) tx
   pure $ EProduct (pack $ nameToText n) ds
 generateElmDecTHC (RecC n tx) = do
   ds <-
@@ -511,8 +506,7 @@ generateElmDefCD cd =
     SimpleConstructor cname fs -> do
       rfs <- generateUnNamedFields fs
       pure $ EProduct cname rfs
-    NullaryConstructor cname -> do
-      pure $ ENullary cname
+    NullaryConstructor cname -> pure $ ENullary cname
 
 generateRecordFields :: NE.NonEmpty (Text, TypeDescriptor) -> LibM [ENamedField]
 generateRecordFields fs =

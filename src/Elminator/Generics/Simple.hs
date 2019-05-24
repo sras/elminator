@@ -21,7 +21,7 @@ import GHC.Generics
 import GHC.TypeLits
 import Language.Haskell.TH
 
-data CName =
+newtype CName =
   CName Text
   deriving (Show)
 
@@ -90,16 +90,16 @@ data HType
   deriving (Show)
 
 class ToHType_ (f :: * -> *) where
-  toHType_ :: (Proxy f) -> HState HType
+  toHType_ :: Proxy f -> HState HType
 
 class ToHField_ (f :: * -> *) where
-  toHField_ :: (Proxy f) -> HState [HField]
+  toHField_ :: Proxy f -> HState [HField]
 
 class ToHConstructor_ (f :: * -> *) where
-  toHConstructor_ :: (Proxy f) -> HState [HConstructor]
+  toHConstructor_ :: Proxy f -> HState [HConstructor]
 
 type family ExtractTArgs (f :: k) :: [*] where
-  ExtractTArgs ((b :: * -> k) a) = a : (ExtractTArgs b)
+  ExtractTArgs ((b :: * -> k) a) = a : ExtractTArgs b
   ExtractTArgs f = '[]
 
 class ToHTArgs f where
@@ -109,12 +109,12 @@ instance ToHTArgs '[] where
   toHTArgs _ = []
 
 instance (ToHType a, ToHTArgs x) => ToHTArgs (a : x) where
-  toHTArgs _ = (toHType (Proxy :: Proxy a)) : (toHTArgs (Proxy :: Proxy x))
+  toHTArgs _ = toHType (Proxy :: Proxy a) : toHTArgs (Proxy :: Proxy x)
 
 class ToHType f where
-  toHType :: (Proxy f) -> HState HType
+  toHType :: Proxy f -> HState HType
   default toHType :: (ToHTArgs (ExtractTArgs f), Generic f, ToHType_ (Rep f)) =>
-    (Proxy f) -> HState HType
+    Proxy f -> HState HType
   toHType _ = do
     targs <- sequence (toHTArgs (Proxy :: Proxy (ExtractTArgs f)))
     htype <- toHType_ (Proxy :: (Proxy (Rep f)))
@@ -127,19 +127,18 @@ instance (ToHConstructor_ b, KnownSymbol a1, KnownSymbol a2, KnownSymbol a3) =>
          ToHType_ (D1 ('MetaData a1 a2 a3 a4) b) where
   toHType_ _ =
     let mdata =
-          (MData
-             (pack $ symbolVal (Proxy :: Proxy a1))
-             (pack $ symbolVal (Proxy :: Proxy a2))
-             (pack $ symbolVal (Proxy :: Proxy a3)))
+          MData
+            (pack $ symbolVal (Proxy :: Proxy a1))
+            (pack $ symbolVal (Proxy :: Proxy a2))
+            (pack $ symbolVal (Proxy :: Proxy a3))
      in do seen <- get
            case DMS.lookup mdata seen of
              Just _ -> pure $ HRecursive mdata
              Nothing -> do
-               case isTuple $ _mTypeName mdata -- Do not tract recursive tuples.
-                     of
+               case isTuple $ _mTypeName mdata of
                  Just _ -> pure ()
                  Nothing -> put $ DMS.insert mdata () seen
-               cons_ <- (toHConstructor_ (Proxy :: Proxy b))
+               cons_ <- toHConstructor_ (Proxy :: Proxy b)
                pure $ HUDef $ UDefData mdata [] cons_
 
 isTuple :: Text -> Maybe Int
@@ -158,8 +157,7 @@ instance (KnownSymbol cname, ToHField_ s) =>
          ToHConstructor_ (C1 ('MetaCons cname a b) s) where
   toHConstructor_ _ = do
     hfield <- toHField_ (Proxy :: Proxy s)
-    pure
-      [HConstructor (CName $ pack $ symbolVal (Proxy :: Proxy cname)) $ hfield]
+    pure [HConstructor (CName $ pack $ symbolVal (Proxy :: Proxy cname)) hfield]
 
 instance ToHField_ U1 where
   toHField_ _ = pure []
@@ -167,18 +165,18 @@ instance ToHField_ U1 where
 instance (KnownSymbol cname, ToHType_ w) =>
          ToHField_ (S1 ('MetaSel ('Just cname) a b c) w) where
   toHField_ _ = do
-    htype <- (toHType_ (Proxy :: Proxy w))
-    pure $ [HField (Just $ pack $ symbolVal (Proxy :: Proxy cname)) htype]
+    htype <- toHType_ (Proxy :: Proxy w)
+    pure [HField (Just $ pack $ symbolVal (Proxy :: Proxy cname)) htype]
 
 instance (ToHType_ w) => ToHField_ (S1 ('MetaSel 'Nothing a b c) w) where
   toHField_ _ = do
-    htype <- (toHType_ (Proxy :: Proxy w))
-    pure $ [HField Nothing htype]
+    htype <- toHType_ (Proxy :: Proxy w)
+    pure [HField Nothing htype]
 
 instance (ToHField_ a, ToHField_ b) => ToHField_ (a :*: b) where
   toHField_ _ = do
-    hfield1 <- (toHField_ (Proxy :: Proxy a))
-    hfield2 <- (toHField_ (Proxy :: Proxy b))
+    hfield1 <- toHField_ (Proxy :: Proxy a)
+    hfield2 <- toHField_ (Proxy :: Proxy b)
     pure $ hfield1 ++ hfield2
 
 instance (ToHConstructor_ a, ToHConstructor_ b) =>
@@ -209,7 +207,7 @@ instance (ToHType a, ToHType b) => ToHType (Either a b)
 
 instance (ToHType a) => ToHType (Maybe a) where
   toHType _ = do
-    htype <- (toHType (Proxy :: Proxy a))
+    htype <- toHType (Proxy :: Proxy a)
     pure $ HMaybe htype
 
 instance ToHType ()
@@ -245,7 +243,7 @@ instance ( ToHType a1
 
 instance (ToHType a) => ToHType [a] where
   toHType _ = do
-    htype <- (toHType (Proxy :: Proxy a))
+    htype <- toHType (Proxy :: Proxy a)
     pure $
       case htype of
         HPrimitive (MData "Char" _ _) -> HPrimitive (MData "String" "" "")

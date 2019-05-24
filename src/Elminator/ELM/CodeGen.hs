@@ -65,8 +65,7 @@ resetIndent :: RenderM ()
 resetIndent = setCI 0
 
 incIndent :: RenderM ()
-incIndent = do
-  modify (\(i, p, t) -> (i + 1, p, t))
+incIndent = modify (\(i, p, t) -> (i + 1, p, t))
 
 renderCI :: RenderM ()
 renderCI = do
@@ -82,10 +81,10 @@ renderElmDec (EType name targs cons_) = do
   renderText "type"
   renderSpace
   renderText name
-  if DL.length targs > 0
+  if not (DL.null targs)
     then renderSpace
     else pure ()
-  renderIC (renderSpace) targs renderText
+  renderIC renderSpace targs renderText
   case cons_ of
     EEmpty -> pure ()
     _ -> do
@@ -102,7 +101,7 @@ renderElmDec (EFunc name sig fargs expr) = do
   renderCI
   renderText name
   renderSpace
-  renderIC (renderSpace) fargs renderText
+  renderIC renderSpace fargs renderText
   renderText " = "
   renderNL
   incIndent
@@ -128,7 +127,7 @@ renderExp (ERec fields) = do
 renderExp (ELet decs exp_) = do
   i0 <- getCI
   p <- getCP
-  renderText $ "let"
+  renderText "let"
   setCI $ p + 1
   i <- getCI
   renderIC
@@ -202,8 +201,8 @@ renderLiteral (EStringL s) = renderText $ pack $ show s
 renderLiteral (EIntL x) = renderText $ pack $ show x
 
 renderCaseBranch :: ECaseBranch -> RenderM ()
-renderCaseBranch (pattern, expr) = do
-  renderPattern pattern
+renderCaseBranch (pat, expr) = do
+  renderPattern pat
   renderText " -> "
   renderExp expr
 
@@ -222,10 +221,10 @@ renderPattern (EListP ps) = do
 renderPattern (EConsP name patterns) = do
   renderText name
   renderSpace
-  renderIC (renderSpace) patterns renderPattern
+  renderIC renderSpace patterns renderPattern
 
 getIntend :: Int -> Text
-getIntend x = T.replicate x $ " "
+getIntend x = T.replicate x " "
 
 renderCon :: ECons -> RenderM ()
 renderCon (ERecord cname fds) = do
@@ -236,7 +235,7 @@ renderCon (ERecord cname fds) = do
 renderCon (EProduct cname fds) = do
   renderText cname
   renderSpace
-  renderIC (renderText " ") (fds) renderText
+  renderIC (renderText " ") fds renderText
 renderCon (ESum cons_) = renderIC (renderText " | ") cons_ renderCon
 renderCon (ENullary con) = renderText con
 renderCon EEmpty = renderText ""
@@ -251,7 +250,7 @@ type FArg = Text
 
 type FSig = Maybe Text
 
-data ElmSrc =
+newtype ElmSrc =
   ElmSrc [EDec]
 
 data EDec
@@ -284,7 +283,7 @@ data EExpr
   deriving (Eq, Show)
 
 instance IsString EExpr where
-  fromString = (EName) . pack
+  fromString = EName . pack
 
 type EField = (Text, EExpr)
 

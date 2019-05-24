@@ -33,7 +33,7 @@ import System.IO (FilePath)
 -- generated type will be polymorphic.
 include :: (ToHType a) => Proxy a -> GenOption -> Builder
 include p dc = do
-  let hType = SState.evalState (toHType p) (DMS.empty)
+  let hType = SState.evalState (toHType p) DMS.empty
   mdata <-
     case hType of
       HUDef (UDefData m _ _) -> pure m
@@ -45,7 +45,7 @@ include p dc = do
   s <- get
   put $ DMS.insertWith (\(a, b) (ea, _) -> (ea ++ a, b)) mdata ([dc], hType) s
 
-generateFor :: ElmVersion -> Options -> (Maybe FilePath) -> Builder -> Q Exp
+generateFor :: ElmVersion -> Options -> Maybe FilePath -> Builder -> Q Exp
 generateFor ev opt mfp sc =
   let (_, gc) = runState sc DMS.empty
       r = do
@@ -68,16 +68,16 @@ generateFor ev opt mfp sc =
        in T.intercalate "\n" $ DMS.foldrWithKey' foldFn [] map_
     foldFn :: Text -> [Text] -> [Text] -> [Text]
     foldFn mod_ smbs in_ =
-      (T.concat ["import ", mod_, " exposing (", T.intercalate ", " smbs, ")"]) :
+      T.concat ["import ", mod_, " exposing (", T.intercalate ", " smbs, ")"] :
       in_
     toExp :: Text -> Exp
     toExp t = LitE $ StringL $ unpack t
     generateOne :: ([GenOption], HType) -> LibM Text
     generateOne (gs, ht) = do
-      srcs <- mapM (generateOne_ ht) $ gs
+      srcs <- mapM (generateOne_ ht) gs
       pure $ T.intercalate "" srcs
       where
         generateOne_ :: HType -> GenOption -> LibM Text
-        generateOne_ h d = do
+        generateOne_ h d =
           case ev of
             Elm19 -> Elm19.generateElm d h opt

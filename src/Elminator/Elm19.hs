@@ -11,12 +11,12 @@ import Data.Aeson as Aeson
 import qualified Data.List as DL
 import qualified Data.List.NonEmpty as NE
 import Data.List.NonEmpty (NonEmpty((:|)))
-import qualified Data.Map.Strict as DMS
 import Data.Maybe
 import Data.Text as T hiding (any, zipWith)
 import Elminator.ELM.CodeGen
 import Elminator.Generics.Simple
 import Elminator.Lib
+import Language.Haskell.TH
 import Prelude
 import qualified Prelude as P
 
@@ -40,8 +40,7 @@ elmFront imports =
   \encodeMaybe : (a -> E.Value)-> Maybe a -> E.Value\n\
   \encodeMaybe fn ma = case ma of\n\
   \  Just a -> fn a\n\
-  \  Nothing -> E.null\n\
-  \\n\n"
+  \  Nothing -> E.null"
     ]
 
 generateTupleEncoder :: Int -> [TypeDescriptor] -> EDec
@@ -79,65 +78,48 @@ generateTupleDecoder nidx types =
 
 generateElm :: GenOption -> HType -> Options -> LibM Text
 generateElm d h opts = do
-  let td = toTypeDescriptor h
-  case d of
-    Definiton Poly -> do
-      hp <- mkPolyMorphic h
-      let tdp = toTypeDescriptor hp
-      collectExtRefs tdp
-      def <- generateElmDef tdp
-      pure $ renderElm $ ElmSrc [def]
-    Definiton Mono -> do
-      def <- generateElmDef td
-      collectExtRefs td
-      pure $ renderElm $ ElmSrc [def]
-    EncoderDecoder -> do
-      let decoder = typeDescriptorToDecoder opts td
-      collectExtRefs td
-      encSrc <- generateEncoder (td, decoder)
-      decSrc <- generateDecoder (td, decoder)
-      pure $ renderElm $ ElmSrc [encSrc, decSrc]
-    Everything Mono -> do
-      let decoder = typeDescriptorToDecoder opts td
-      collectExtRefs td
-      def <- generateElmDef td
-      encSrc <- generateEncoder (td, decoder)
-      decSrc <- generateDecoder (td, decoder)
-      pure $ renderElm $ ElmSrc [def, encSrc, decSrc]
-    Everything Poly -> do
-      hp <- mkPolyMorphic h
-      let tdp = toTypeDescriptor hp
-          decoder = typeDescriptorToDecoder opts td
-      collectExtRefs td
-      def <- generateElmDef tdp
-      encSrc <- generateEncoder (tdp, decoder)
-      decSrc <- generateDecoder (tdp, decoder)
-      pure $ renderElm $ ElmSrc [def, encSrc, decSrc]
-
-getCTDataName :: CTData -> Text
-getCTDataName (CTData n _) = tnHead n
-getCTDataName (CTEmpty n) = tnHead n
+  td <- toTypeDescriptor h
+  collectExtRefs td
+  src <-
+    case d of
+      Definiton Mono -> do
+        def <- generateElmDef td False
+        pure $ ElmSrc [def]
+      Definiton Poly -> do
+        def <- generateElmDef td True
+        pure $ ElmSrc [def]
+      Everything Mono -> do
+        let decoder = typeDescriptorToDecoder opts td
+        def <- generateElmDef td False
+        encSrc <- generateEncoder (td, decoder)
+        decSrc <- generateDecoder (td, decoder)
+        pure $ ElmSrc [def, encSrc, decSrc]
+      Everything Poly -> do
+        def <- generateElmDef td True
+        let decoder = typeDescriptorToDecoder opts td
+        encSrc <- generateEncoder (td, decoder)
+        decSrc <- generateDecoder (td, decoder)
+        pure $ ElmSrc [def, encSrc, decSrc]
+      EncoderDecoder -> do
+        let decoder = typeDescriptorToDecoder opts td
+        encSrc <- generateEncoder (td, decoder)
+        decSrc <- generateDecoder (td, decoder)
+        pure $ ElmSrc [encSrc, decSrc]
+  pure $ renderElm $ src
 
 generateDecoder :: (TypeDescriptor, Decoder) -> LibM EDec
 generateDecoder (td, decoder) = do
-  tdisplay <- mkTypeDisplayFromTd td
+  tdisplay <- renderType td
   pure $
     case td of
-      (SimpleType ctdata) -> fn ctdata tdisplay
-      (Polymorphic _ ctdata) -> fn ctdata tdisplay
+      (TOccupied md _ _ _) -> fn (_mTypeName md) tdisplay
       _ -> error "Encoders/decoders can only be made for user defined types"
   where
-    fn :: CTData -> TypeDisplay -> EDec
-    fn ctdata tdisp =
+    fn :: Text -> Text -> EDec
+    fn tn tdisp =
       EFunc
-        (T.concat ["decode", getCTDataName ctdata])
-        (Just $
-         T.concat
-           [ "D.Decoder"
-           , " "
-           , let TypeDisplay x = tdisp
-              in x
-           ])
+        (T.concat ["decode", tn])
+        (Just $ T.concat ["D.Decoder", " (", tdisp, ")"])
         [] $
       decoderToDecoderEExpr decoder
 
@@ -228,7 +210,7 @@ contentDecoderToExp mcntFname cname cd =
     mapFn :: (FieldName, FieldTag, TypeDescriptor) -> EExpr
     mapFn (_, ft, td) =
       case td of
-        TDMaybe wtd ->
+        TMaybe wtd ->
           EFuncApp
             "D.maybe"
             (EFuncApp
@@ -286,24 +268,17 @@ mkTupleMaker tmName idx fds =
 
 generateEncoder :: (TypeDescriptor, Decoder) -> LibM EDec
 generateEncoder (td, decoder) = do
-  tdisplay <- mkTypeDisplayFromTd td
+  tdisplay <- renderType td
   pure $
     case td of
-      SimpleType ctdata -> fn ctdata tdisplay
-      Polymorphic _ ctdata -> fn ctdata tdisplay
+      (TOccupied md _ _ _) -> fn (_mTypeName md) tdisplay
       _ -> error "Encoders/decoders can only be made for user defined types"
   where
-    fn :: CTData -> TypeDisplay -> EDec
-    fn ctdata tdisp =
+    fn :: Text -> Text -> EDec
+    fn tname tdisp =
       EFunc
-        (T.concat ["encode", getCTDataName ctdata])
-        (Just $
-         T.concat
-           [ let TypeDisplay x = tdisp
-              in x
-           , " -> "
-           , "E.Value"
-           ])
+        (T.concat ["encode", tname])
+        (Just $ T.concat [tdisp, " -> ", "E.Value"])
         ["a"] $
       decoderToEncoderEExpr $ decoder
 
@@ -405,67 +380,45 @@ contentDecoderToEncoderExp mct cd =
         ]
 
 getEncoderExpr :: Int -> TypeDescriptor -> EExpr
-getEncoderExpr idx (SimpleType ctd) =
-  case isTuple $ getCTDName ctd of
-    Just _ ->
-      let tds =
-            case ctd of
-              CTData _ ((SimpleConstructor _ netds) :| []) -> NE.toList netds
-              CTData _ _ -> []
-              CTEmpty _ -> []
-       in case tds of
-            [] -> ELambda (EFuncApp (EFuncApp "E.list" "identity") $ EList [])
-            (_:_) ->
-              ELet
-                [generateTupleEncoder idx tds]
-                (EName $ T.concat ["encodeTuple", pack $ show idx])
-    Nothing -> EName $ T.concat ["encode", getCTDName ctd]
-getEncoderExpr _ (Polymorphic _ ctd) =
-  case isTuple $ getCTDName ctd of
-    Just _ -> error "Not implemented"
-    Nothing -> EName $ T.concat ["encode", getCTDName ctd]
-getEncoderExpr _ (Primitive n _) = EName $ getPrimitiveEncoder n
-getEncoderExpr idx (List x) = (EFuncApp "E.list" (getEncoderExpr idx x))
-getEncoderExpr idx (TDMaybe x) = (EFuncApp "encodeMaybe" (getEncoderExpr idx x))
+getEncoderExpr idx (TTuple tds) =
+  case tds of
+    [] -> ELambda (EFuncApp (EFuncApp "E.list" "identity") $ EList [])
+    (_:_) ->
+      ELet
+        [generateTupleEncoder idx tds]
+        (EName $ T.concat ["encodeTuple", pack $ show idx])
+getEncoderExpr _ (TOccupied md _ _ _) =
+  EName $ T.concat ["encode", _mTypeName md]
+getEncoderExpr _ (TPrimitive n) = EName $ getPrimitiveEncoder $ _mTypeName n
+getEncoderExpr idx (TList x) = (EFuncApp "E.list" (getEncoderExpr idx x))
+getEncoderExpr idx (TMaybe x) = (EFuncApp "encodeMaybe" (getEncoderExpr idx x))
 getEncoderExpr _ (TRecusrive md) = EName $ T.concat ["encode", _mTypeName md]
 getEncoderExpr _ (TExternal (ExInfo _ (Just ei) _) _) =
   EName $ T.concat [extSymbol ei]
 getEncoderExpr _ (TExternal (ExInfo _ _ _) _) = error "Encoder not found"
-getEncoderExpr _ (TTypeVar _) = error "No encoder for type variable"
+getEncoderExpr _ _ = error "Encoder not found"
 
 getDecoderExpr :: Int -> TypeDescriptor -> EExpr
 getDecoderExpr idx td =
   let expr =
         case td of
-          SimpleType ctd ->
-            case isTuple $ getCTDName ctd of
-              Just _ ->
-                let tds =
-                      case ctd of
-                        CTData _ ((SimpleConstructor _ netds) :| []) ->
-                          NE.toList netds
-                        CTData _ _ -> []
-                        CTEmpty _ -> []
-                 in case tds of
-                      [] -> EFuncApp "D.succeed" "()"
-                      (_:_) ->
-                        ELet [generateTupleDecoder idx tds] $
-                        EName $ T.concat ["decodeTuple", pack $ show $ idx]
-              Nothing -> EName $ T.concat ["decode", getCTDName ctd]
-          Polymorphic _ ctd ->
-            case isTuple $ getCTDName ctd of
-              Just c -> EName $ T.concat ["decodeTuple", pack $ show $ c]
-              Nothing -> EName $ T.concat ["decode", getCTDName ctd]
-          Primitive n _ -> EName $ getPrimitiveDecoder n
-          List x -> EFuncApp (EName "D.list") (getDecoderExpr idx x)
+          TEmpty _ _ _ -> error "Cannot decode empty types"
+          TTuple tds ->
+            case tds of
+              [] -> EFuncApp "D.succeed" "()"
+              (_:_) ->
+                ELet [generateTupleDecoder idx tds] $
+                EName $ T.concat ["decodeTuple", pack $ show $ idx]
+          TOccupied md _ _ _ -> EName $ T.concat ["decode", _mTypeName md]
+          TPrimitive n -> EName $ getPrimitiveDecoder $ _mTypeName n
+          TList x -> EFuncApp (EName "D.list") (getDecoderExpr idx x)
           TRecusrive md ->
             EFuncApp "D.lazy" $
             ELambda $ EName $ T.concat ["decode", _mTypeName md]
-          TDMaybe x -> (EFuncApp "D.maybe" (getDecoderExpr idx x))
+          TMaybe x -> (EFuncApp "D.maybe" (getDecoderExpr idx x))
           (TExternal (ExInfo _ _ (Just ei)) _) ->
             EName $ T.concat [extSymbol ei]
           (TExternal (ExInfo _ _ _) _) -> error "Decoder not found"
-          (TTypeVar _) -> error "No Decoder for type var"
    in if checkRecursion td
         then EFuncApp "D.lazy" $ ELambda $ expr
         else expr
@@ -473,23 +426,21 @@ getDecoderExpr idx td =
 checkRecursion :: TypeDescriptor -> Bool
 checkRecursion td_ =
   case td_ of
-    SimpleType ctdata -> any id $ checkRecursion <$> getTypeDescriptors ctdata
-    Polymorphic _ ctdata ->
-      any id $ checkRecursion <$> getTypeDescriptors ctdata
-    List td -> checkRecursion td
-    TDMaybe td -> checkRecursion td
-    Primitive _ _ -> False
+    TOccupied _ _ _ cnstrs ->
+      any id $ checkRecursion <$> getTypeDescriptors cnstrs
+    TList td -> checkRecursion td
+    TMaybe td -> checkRecursion td
+    TPrimitive _ -> False
     TRecusrive _ -> True
     TExternal _ _ -> False
-    TTypeVar _ -> False
+    TTuple tds -> any id $ checkRecursion <$> tds
+    TEmpty _ _ _ -> False
   where
-    getTypeDescriptors :: CTData -> [TypeDescriptor]
-    getTypeDescriptors (CTEmpty _) = []
-    getTypeDescriptors (CTData _ ncd) =
-      P.concat $ NE.toList $ NE.map getFromCd ncd
+    getTypeDescriptors :: Constructors -> [TypeDescriptor]
+    getTypeDescriptors ncd = P.concat $ NE.toList $ NE.map getFromCd ncd
     getFromCd :: ConstructorDescriptor -> [TypeDescriptor]
     getFromCd (RecordConstructor _ fds) =
-      NE.toList $ NE.map (\(NamedField _ td) -> td) fds
+      NE.toList $ NE.map (\(_, td) -> td) fds
     getFromCd (SimpleConstructor _ fds) = NE.toList fds
     getFromCd (NullaryConstructor _) = []
 
@@ -508,20 +459,43 @@ getPrimitiveEncoder "Bool" = "E.bool"
 getPrimitiveEncoder s = T.concat ["encode", s]
 
 -- | Generate Elm type definitions
-generateElmDef :: TypeDescriptor -> LibM EDec
-generateElmDef td =
+generateElmDef :: TypeDescriptor -> Bool -> LibM EDec
+generateElmDef td needPoly = do
   case td of
-    SimpleType (CTData tname c) -> do
-      defC <- generateElmDefC c
-      pure $ EType (tnHead tname) [] defC
-    SimpleType (CTEmpty tname) -> do
-      pure $ EType (tnHead tname) [] EEmpty
-    Polymorphic tvars (CTData tname c) -> do
-      defC <- generateElmDefC c
-      pure $ EType (tnHead tname) (renderTypeVar <$> tvars) defC
-    Polymorphic _targs (CTEmpty tname) ->
-      pure $ EType (tnHead tname) undefined EEmpty
-    _ -> error "Not implemented"
+    TEmpty (MData a _ _) tvars _ ->
+      pure $ EType a (getTypeVars tvars needPoly) EEmpty
+    TOccupied (MData a _ _) (ReifyInfo tvars cnstrs) _ c -> do
+      defC <-
+        if needPoly
+          then generateElmDecTHCS cnstrs
+          else generateElmDefC c
+      pure $ EType a (getTypeVars tvars needPoly) defC
+    _ -> error "Can only create definitions for use defined types"
+
+getTypeVars :: [TypeVar] -> Bool -> [Text]
+getTypeVars tds needPoly =
+  if needPoly
+    then (renderTypeVar <$> tds)
+    else []
+
+generateElmDecTHCS :: [Con] -> LibM ECons
+generateElmDecTHCS cs = do
+  a <- mapM generateElmDecTHC cs
+  pure $ ESum a
+
+generateElmDecTHC :: Con -> LibM ECons
+generateElmDecTHC (NormalC n tx) = do
+  ds <- mapM (\(_, t) -> wrapInPara <$> (renderTHType t)) tx
+  pure $ EProduct (pack $ nameToText n) ds
+generateElmDecTHC (RecC n tx) = do
+  ds <-
+    mapM
+      (\(nm, _, t) -> do
+         x <- renderTHType t
+         pure (pack $ nameToText nm, x))
+      tx
+  pure $ ERecord (pack $ nameToText n) ds
+generateElmDecTHC _ = error "Not implemented"
 
 generateElmDefC :: Constructors -> LibM ECons
 generateElmDefC cds = do
@@ -540,49 +514,16 @@ generateElmDefCD cd =
     NullaryConstructor cname -> do
       pure $ ENullary cname
 
-generateRecordFields :: Fields NamedField -> LibM [ENamedField]
+generateRecordFields :: NE.NonEmpty (Text, TypeDescriptor) -> LibM [ENamedField]
 generateRecordFields fs =
   case fs of
     (nf :| []) -> mapM mapFn [nf]
     n -> mapM mapFn $ NE.toList n
   where
-    mapFn :: NamedField -> LibM ENamedField
-    mapFn (NamedField a b) = do
-      t <- mkTypeDisplayFromTd b
-      pure (a, t)
+    mapFn :: (Text, TypeDescriptor) -> LibM ENamedField
+    mapFn (a, b) = do
+      x <- renderType b
+      pure (a, x)
 
-generateUnNamedFields :: Fields TypeDescriptor -> LibM [TypeDisplay]
-generateUnNamedFields fds = mapM mkTypeDisplayFromTd $ NE.toList fds
-
-mkTypeDisplayFromTd :: TypeDescriptor -> LibM TypeDisplay
-mkTypeDisplayFromTd td = do
-  seen <- ask
-  x <-
-    case getMDataFromTd td of
-      Just md ->
-        case hasPoly <$> (DMS.lookup md seen) of
-          Just True -> pure $ TypeDisplay $ getRenderedName td
-          Just False -> pure $ TypeDisplay $ _mTypeName md
-          Nothing -> pure $ TypeDisplay $ getRenderedName td
-      Nothing -> pure $ TypeDisplay $ getRenderedName td
-  pure x
-
-hasPoly :: [(GenOption, HType)] -> Bool
-hasPoly cl = isJust $ DL.find fn cl
-  where
-    fn :: (GenOption, HType) -> Bool
-    fn (Definiton Poly, _) = True
-    fn (Everything Poly, _) = True
-    fn _ = False
-
-getMDataFromTd :: TypeDescriptor -> Maybe MData
-getMDataFromTd td =
-  case td of
-    SimpleType c -> Just $ getMDataFromCTdata c
-    Polymorphic _ c -> Just $ getMDataFromCTdata c
-    TRecusrive md -> Just md
-    _ -> Nothing
-
-getMDataFromCTdata :: CTData -> MData
-getMDataFromCTdata (CTData tn _) = tnMData tn
-getMDataFromCTdata (CTEmpty tn) = tnMData tn
+generateUnNamedFields :: NE.NonEmpty TypeDescriptor -> LibM [Text]
+generateUnNamedFields fds = mapM renderType $ NE.toList fds

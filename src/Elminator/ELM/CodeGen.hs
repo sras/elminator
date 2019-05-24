@@ -1,9 +1,4 @@
-{-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE TypeSynonymInstances #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TypeOperators #-}
 
 module Elminator.ELM.CodeGen where
 
@@ -91,11 +86,14 @@ renderElmDec (EType name targs cons_) = do
     then renderSpace
     else pure ()
   renderIC (renderSpace) targs renderText
-  renderSpace
-  renderText "="
-  renderSpace
-  renderCon cons_
-  resetIndent
+  case cons_ of
+    EEmpty -> pure ()
+    _ -> do
+      renderSpace
+      renderText "="
+      renderSpace
+      renderCon cons_
+      resetIndent
 renderElmDec (EFunc name sig fargs expr) = do
   case sig of
     Just s -> renderText $ T.concat [name, " : ", s]
@@ -238,16 +236,13 @@ renderCon (ERecord cname fds) = do
 renderCon (EProduct cname fds) = do
   renderText cname
   renderSpace
-  renderIC (renderText " ") (fds) (renderText . renderType)
+  renderIC (renderText " ") (fds) renderText
 renderCon (ESum cons_) = renderIC (renderText " | ") cons_ renderCon
 renderCon (ENullary con) = renderText con
 renderCon EEmpty = renderText ""
 
-renderType :: TypeDisplay -> Text
-renderType (TypeDisplay x) = x
-
 renderNamedField :: ENamedField -> Text
-renderNamedField (name, td) = T.concat [name, " : ", renderType td]
+renderNamedField (name, td) = T.concat [name, " : ", td]
 
 -- | Elm code gen
 type TArg = Text
@@ -267,17 +262,13 @@ data EDec
 
 data ECons
   = ERecord Text [ENamedField]
-  | EProduct Text [TypeDisplay]
+  | EProduct Text [Text]
   | ESum [ECons]
   | ENullary Text
   | EEmpty
   deriving (Show, Eq)
 
-data TypeDisplay =
-  TypeDisplay Text
-  deriving (Show, Eq)
-
-type ENamedField = (Text, TypeDisplay)
+type ENamedField = (Text, Text)
 
 data EExpr
   = ECase EExpr [ECaseBranch]

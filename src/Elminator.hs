@@ -1,8 +1,3 @@
-{-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE TypeSynonymInstances #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE KindSignatures #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Elminator
@@ -41,15 +36,14 @@ include p dc = do
   let hType = SState.evalState (toHType p) (DMS.empty)
   mdata <-
     case hType of
-      HUDef (UDefData m _ _ _) -> pure m
+      HUDef (UDefData m _ _) -> pure m
       HPrimitive _ -> error "Direct encoding of primitive type is not supported"
       HMaybe _ -> error "Direct encoding of maybe type is not supported"
       HList _ -> error "Direct encoding of list type is not supported"
-      HTypeVar _ -> error "Unexpected meta data"
       HRecursive _ -> error "Unexpected meta data"
       HExternal _ _ -> error "Cannot generate code for external types"
   s <- get
-  put $ DMS.insertWith (++) mdata [(dc, hType)] s
+  put $ DMS.insertWith (\(a, b) (ea, _) -> (ea ++ a, b)) mdata ([dc], hType) s
 
 generateFor :: ElmVersion -> Options -> (Maybe FilePath) -> Builder -> Q Exp
 generateFor ev opt mfp sc =
@@ -78,12 +72,12 @@ generateFor ev opt mfp sc =
       in_
     toExp :: Text -> Exp
     toExp t = LitE $ StringL $ unpack t
-    generateOne :: [(GenOption, HType)] -> LibM Text
-    generateOne dcs = do
-      srcs <- mapM generateOne_ $ dcs
-      pure $ T.intercalate "\n\n" srcs
+    generateOne :: ([GenOption], HType) -> LibM Text
+    generateOne (gs, ht) = do
+      srcs <- mapM (generateOne_ ht) $ gs
+      pure $ T.intercalate "" srcs
       where
-        generateOne_ :: (GenOption, HType) -> LibM Text
-        generateOne_ (d, h) = do
+        generateOne_ :: HType -> GenOption -> LibM Text
+        generateOne_ h d = do
           case ev of
             Elm19 -> Elm19.generateElm d h opt

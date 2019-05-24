@@ -1,13 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE PolyKinds #-}
@@ -18,6 +15,7 @@ import Control.Monad.State.Strict
 import qualified Data.List as DL
 import qualified Data.Map.Strict as DMS
 import Data.Proxy
+import Data.String
 import Data.Text as T
 import GHC.Generics
 import GHC.TypeLits
@@ -62,6 +60,9 @@ data MData =
     }
   deriving (Show, Ord, Eq)
 
+instance IsString MData where
+  fromString x = MData (pack x) "" ""
+
 data HConstructor =
   HConstructor CName [HField]
   deriving (Show)
@@ -74,8 +75,7 @@ data TypeVar
 data UDefData =
   UDefData
     { udefdMdata :: MData
-    , udefdTypeArgs :: [HType] -- to store the concrete types this type was initialized with.
-    , udefdTypeVars :: Maybe [TypeVar] -- to store the type variables info from reify.
+    , udefdTypeArgs :: [HType]
     , udefDConstructors :: [HConstructor]
     }
   deriving (Show)
@@ -85,7 +85,6 @@ data HType
   | HMaybe HType -- We need to indentify Maybe fields so that they can be special cased for omitNothingFields.
   | HList HType
   | HPrimitive MData
-  | HTypeVar Name -- Used when representing polymorphic types
   | HRecursive MData
   | HExternal ExInfo [HType]
   deriving (Show)
@@ -141,7 +140,7 @@ instance (ToHConstructor_ b, KnownSymbol a1, KnownSymbol a2, KnownSymbol a3) =>
                  Just _ -> pure ()
                  Nothing -> put $ DMS.insert mdata () seen
                cons_ <- (toHConstructor_ (Proxy :: Proxy b))
-               pure $ HUDef $ UDefData mdata [] Nothing cons_
+               pure $ HUDef $ UDefData mdata [] cons_
 
 isTuple :: Text -> Maybe Int
 isTuple t =
@@ -151,6 +150,9 @@ isTuple t =
         then Just $ DL.length $ T.split (== ',') t
         else Nothing
     _ -> Nothing
+
+instance ToHConstructor_ V1 where
+  toHConstructor_ _ = pure []
 
 instance (KnownSymbol cname, ToHField_ s) =>
          ToHConstructor_ (C1 ('MetaCons cname a b) s) where

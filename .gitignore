@@ -2,3 +2,5 @@
 elminator.cabal
 *~
 dist
+dist-newstyle
+.ghc*

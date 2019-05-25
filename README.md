@@ -114,3 +114,13 @@ instance (ToHType a, ToHType b) => ToHType (MyExtType a b) where
           (Just $ ExItem "Lib" "decodeMyExtType"))
         [ha, hb]
 ```
+
+### Installing
+
+If you are using the Stack tool, then for the time being, you have to add Elminator to the extra deps section of stack.yaml as follows.
+
+```yaml
+extra-deps:
+  elminator-0.1.0.0
+```
+

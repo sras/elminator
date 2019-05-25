@@ -1,5 +1,51 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+{-|
+
+Generate Elm type definitions, encoders and decoders from Haskell data types.
+
+@
+  \{\-\#Language ScopedTypeVariables\#-\}
+  \{\-\#Language FlexibleInstances\#-\}
+  \{\-\#Language DeriveAnyClass\#-\}
+  \{\-\#Language OverloadedStrings\#-\}
+
+  module Lib  where
+
+  import Elminator
+  import GHC.Generics
+
+  data SingleCon = SingleCon (Maybe Int) String deriving (Generic, ToHType)
+  data WithMaybesPoly a b =
+    WithMaybesPoly
+      { mbpF1 :: Maybe a
+      , mbpF2 :: Maybe b
+      }
+    deriving (Generic, ToHType)
+
+@
+
+Here is how we generate Elm source for the above defined types.
+
+@
+\{\-\#Language OverloadedStrings\#-\}
+\{\-\#Language TemplateHaskell\#-\}
+
+module CodeGen where
+
+import Data.Proxy
+import Elminator
+import Data.Text
+
+import Lib
+
+elmSource :: Text
+elmSource = $(generateFor Elm19 myDefaultOptions (Just ".\/elm-app\/src\/Autogen.elm") $ do
+  include (Proxy :: Proxy SingleCon) $ Everything Mono
+  include (Proxy :: Proxy (WithMaybesPoly (Maybe String) Float)) $ Definiton Poly
+
+@
+-}
 module Elminator
   ( module Elminator
   , ElmVersion(..)
@@ -45,6 +91,9 @@ include p dc = do
   s <- get
   put $ DMS.insertWith (\(a, b) (ea, _) -> (ea ++ a, b)) mdata ([dc], hType) s
 
+-- | Return the generated Elm code in a template haskell splice and optionally
+-- write to a Elm source file at the same time. The second argument is the Options type
+-- from Aeson library. Use `include` calls to build the `Builder` value.
 generateFor :: ElmVersion -> Options -> Maybe FilePath -> Builder -> Q Exp
 generateFor ev opt mfp sc =
   let (_, gc) = runState sc DMS.empty

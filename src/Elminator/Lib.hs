@@ -80,7 +80,7 @@ data PolyConfig
 
 -- | Decides which among type definiton, encoder and decoder
 -- will be included for a type. The poly config value decides
--- wether the included type definition will be poly morphic.
+-- wether the included type definition will be polymorphic.
 data GenOption
   = Definiton PolyConfig
   | EncoderDecoder

@@ -1,5 +1,5 @@
 name:                elminator
-version:             0.2.0.0
+version:             0.2.1.0
 git:                 "https://github.com/sras/elminator.git"
 license:             BSD3
 author:              "Sandeep.C.R"
@@ -30,11 +30,11 @@ library:
     - Elminator
   other-modules:
     - Elminator.Generics.Simple
-    - Elminator.ELM.CodeGen
+    - Elminator.ELM.Elm19
+    - Elminator.ELM.Elm18
+    - Elminator.ELM.Generator
+    - Elminator.ELM.Render
     - Elminator.Lib
-    - Elminator.Elm
-    - Elminator.Elm19
-    - Elminator.Elm18
 
 tests:
   elminator-test:

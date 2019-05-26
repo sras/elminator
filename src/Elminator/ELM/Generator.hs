@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Elminator.Elm
+module Elminator.ELM.Generator
   ( generateElm
   , typeDescriptorToDecoder
   , elmFront
@@ -13,30 +13,30 @@ import qualified Data.List.NonEmpty as NE
 import Data.List.NonEmpty (NonEmpty((:|)))
 import Data.Maybe
 import Data.Text as T hiding (any, zipWith)
-import Elminator.ELM.CodeGen
-import qualified Elminator.Elm18 as Elm18
-import qualified Elminator.Elm19 as Elm19
+import qualified Elminator.ELM.Elm18 as Elm18
+import qualified Elminator.ELM.Elm19 as Elm19
+import Elminator.ELM.Render
 import Elminator.Generics.Simple
 import Elminator.Lib
 import Language.Haskell.TH
 import Prelude
 import qualified Prelude as P
 
-elmFront :: LibM (Text -> Text)
+elmFront :: GenM (Text -> Text)
 elmFront = do
   (ev, _) <- ask
   case ev of
     Elm0p19 -> pure $ Elm19.elmFront
     Elm0p18 -> pure $ Elm18.elmFront
 
-listEncoder :: LibM EExpr
+listEncoder :: GenM EExpr
 listEncoder = do
   (ev, _) <- ask
   case ev of
     Elm0p19 -> pure $ Elm19.listEncoder
     Elm0p18 -> pure $ Elm18.listEncoder
 
-generateTupleEncoder :: Int -> [TypeDescriptor] -> LibM EDec
+generateTupleEncoder :: Int -> [TypeDescriptor] -> GenM EDec
 generateTupleEncoder idx types = do
   eexpr <- getExpr
   pure $
@@ -74,7 +74,7 @@ generateTupleDecoder nidx types =
   where
     mktName = T.concat ["mkTuple", pack $ show nidx]
 
-generateElm :: GenOption -> HType -> Options -> LibM Text
+generateElm :: GenOption -> HType -> Options -> GenM Text
 generateElm d h opts = do
   td <- toTypeDescriptor h
   collectExtRefs td
@@ -105,14 +105,14 @@ generateElm d h opts = do
         pure $ ElmSrc [encSrc, decSrc]
   pure $ renderElm src
 
-generateDecoder :: (TypeDescriptor, Decoder) -> LibM EDec
+generateDecoder :: (TypeDescriptor, Decoder) -> GenM EDec
 generateDecoder (td, decoder) = do
   tdisplay <- renderType td
   case td of
     (TOccupied md _ _ _) -> fn (_mTypeName md) tdisplay
     _ -> error "Encoders/decoders can only be made for user defined types"
   where
-    fn :: Text -> Text -> LibM EDec
+    fn :: Text -> Text -> GenM EDec
     fn tn tdisp = do
       x <- decoderToDecoderEExpr decoder
       pure $
@@ -125,7 +125,7 @@ generateDecoder (td, decoder) = do
 prependMk :: Text -> Text
 prependMk x = T.concat ["mk", x]
 
-decoderToDecoderEExpr :: Decoder -> LibM EExpr
+decoderToDecoderEExpr :: Decoder -> GenM EExpr
 decoderToDecoderEExpr d =
   case d of
     DUnderConKey cds -> do
@@ -156,7 +156,7 @@ decoderToDecoderEExpr d =
       exprs <- mapM (uncurry (contentDecoderToExp Nothing)) cds
       pure $ EFuncApp "D.oneOf" (EList exprs)
 
-mkTryCons :: Maybe Text -> [(ConName, ConTag, ContentDecoder)] -> LibM EDec
+mkTryCons :: Maybe Text -> [(ConName, ConTag, ContentDecoder)] -> GenM EDec
 mkTryCons mcntFname cds = do
   cbs <- mapM fn1 cds
   pure $ EFunc "tryCons" Nothing ["v"] $ ECase "v" (cbs ++ [emptyPattern])
@@ -164,19 +164,19 @@ mkTryCons mcntFname cds = do
     emptyPattern =
       ( EWildP
       , EFuncApp "D.fail" (ELiteral $ EStringL "None of the constructors match"))
-    fn1 :: (ConName, ConTag, ContentDecoder) -> LibM ECaseBranch
+    fn1 :: (ConName, ConTag, ContentDecoder) -> GenM ECaseBranch
     fn1 (cname, ctag, cd) = do
       expression <- contentDecoderToExp mcntFname cname cd
       let pat = ELitP (EStringL $ unpack ctag)
        in pure (pat, expression)
 
-decodeUnderConKey :: (ConName, ConTag, ContentDecoder) -> LibM EExpr
+decodeUnderConKey :: (ConName, ConTag, ContentDecoder) -> GenM EExpr
 decodeUnderConKey (cname, ctag, cd) = do
   decoderExp <- contentDecoderToExp Nothing cname cd
   pure $
     EFuncApp (EFuncApp "D.field" (ELiteral $ EStringL $ unpack ctag)) decoderExp
 
-contentDecoderToExp :: Maybe Text -> ConName -> ContentDecoder -> LibM EExpr
+contentDecoderToExp :: Maybe Text -> ConName -> ContentDecoder -> GenM EExpr
 contentDecoderToExp mcntFname cname cd =
   pure $
   case cd of
@@ -265,14 +265,14 @@ mkTupleMaker tmName idx fds =
           [(1 :: Int) ..]
    in EFunc tmName Nothing args $ ETuple (EName <$> args)
 
-generateEncoder :: (TypeDescriptor, Decoder) -> LibM EDec
+generateEncoder :: (TypeDescriptor, Decoder) -> GenM EDec
 generateEncoder (td, decoder) = do
   tdisplay <- renderType td
   case td of
     (TOccupied md _ _ _) -> fn (_mTypeName md) tdisplay
     _ -> error "Encoders/decoders can only be made for user defined types"
   where
-    fn :: Text -> Text -> LibM EDec
+    fn :: Text -> Text -> GenM EDec
     fn tname tdisp = do
       expr <- decoderToEncoderEExpr decoder
       pure $
@@ -282,7 +282,7 @@ generateEncoder (td, decoder) = do
           ["a"]
           expr
 
-decoderToEncoderEExpr :: Decoder -> LibM EExpr
+decoderToEncoderEExpr :: Decoder -> GenM EExpr
 decoderToEncoderEExpr d =
   case d of
     DUnderConKey cons_ -> do
@@ -298,11 +298,11 @@ decoderToEncoderEExpr d =
       bs <- mapM mapFn4 cons_
       pure $ ECase "a" bs
   where
-    mapFn4 :: (ConName, ContentDecoder) -> LibM ECaseBranch
+    mapFn4 :: (ConName, ContentDecoder) -> GenM ECaseBranch
     mapFn4 (cname, cd) = do
       expr <- contentDecoderToEncoderExp Nothing cd
       pure (makePattern (cname, "", cd), expr)
-    mapFn3 :: (ConName, ConTag, ContentDecoder) -> LibM ECaseBranch
+    mapFn3 :: (ConName, ConTag, ContentDecoder) -> GenM ECaseBranch
     mapFn3 a@(_, ctag, cd) = do
       exprs <- contentDecoderToEncoderExp Nothing cd
       le <- listEncoder
@@ -312,11 +312,11 @@ decoderToEncoderEExpr d =
            EList
              [EFuncApp "E.string" $ ELiteral $ EStringL $ unpack ctag, exprs]))
     mapFn2 ::
-         Text -> Text -> (ConName, ConTag, ContentDecoder) -> LibM ECaseBranch
+         Text -> Text -> (ConName, ConTag, ContentDecoder) -> GenM ECaseBranch
     mapFn2 tfn cfn a = do
       expr <- encoderTagged tfn cfn a
       pure (makePattern a, expr)
-    mapFn :: (ConName, ConTag, ContentDecoder) -> LibM ECaseBranch
+    mapFn :: (ConName, ConTag, ContentDecoder) -> GenM ECaseBranch
     mapFn a = do
       expr <- encoderUnderConKey a
       pure (makePattern a, expr)
@@ -334,14 +334,14 @@ decoderToEncoderEExpr d =
         CDRaw _ -> EConsP cname [EVarP "a1"]
         CDEmpty -> EConsP cname []
 
-encoderUnderConKey :: (ConName, ConTag, ContentDecoder) -> LibM EExpr
+encoderUnderConKey :: (ConName, ConTag, ContentDecoder) -> GenM EExpr
 encoderUnderConKey (_, ctag, cd) = do
   decoderExp <- contentDecoderToEncoderExp Nothing cd
   pure $
     EFuncApp "E.object" $
     EList [ETuple [ELiteral $ EStringL $ unpack ctag, decoderExp]]
 
-encoderTagged :: Text -> Text -> (ConName, ConTag, ContentDecoder) -> LibM EExpr
+encoderTagged :: Text -> Text -> (ConName, ConTag, ContentDecoder) -> GenM EExpr
 encoderTagged tfn cfn (_, ctag, cd) =
   case cd of
     CDRecord _ -> contentDecoderToEncoderExp (Just (tfn, ctag)) cd
@@ -359,7 +359,7 @@ encoderTagged tfn cfn (_, ctag, cd) =
           ]
 
 contentDecoderToEncoderExp ::
-     Maybe (FieldName, ConTag) -> ContentDecoder -> LibM EExpr
+     Maybe (FieldName, ConTag) -> ContentDecoder -> GenM EExpr
 contentDecoderToEncoderExp mct cd =
   case cd of
     CDRecord fds -> do
@@ -389,11 +389,11 @@ contentDecoderToEncoderExp mct cd =
       le <- listEncoder
       pure $ EFuncApp (EFuncApp le "identity") $ EList []
   where
-    zipFn :: TypeDescriptor -> Int -> LibM EExpr
+    zipFn :: TypeDescriptor -> Int -> GenM EExpr
     zipFn td idx = do
       encodeExp <- getEncoderExpr 0 td
       pure $ EFuncApp encodeExp $ EName $ T.concat ["a", pack $ show idx]
-    mapFn :: (FieldName, FieldTag, TypeDescriptor) -> LibM EExpr
+    mapFn :: (FieldName, FieldTag, TypeDescriptor) -> GenM EExpr
     mapFn (fn, ft, td) = do
       encoderName <- getEncoderExpr 0 td
       pure $
@@ -402,7 +402,7 @@ contentDecoderToEncoderExp mct cd =
           , EFuncApp encoderName $ EName $ T.concat ["x", ".", fn]
           ]
 
-getEncoderExpr :: Int -> TypeDescriptor -> LibM EExpr
+getEncoderExpr :: Int -> TypeDescriptor -> GenM EExpr
 getEncoderExpr idx (TTuple tds) = do
   expr <- generateTupleEncoder idx tds
   le <- listEncoder
@@ -486,7 +486,7 @@ getPrimitiveEncoder "Bool" = "E.bool"
 getPrimitiveEncoder s = T.concat ["encode", s]
 
 -- | Generate Elm type definitions
-generateElmDef :: TypeDescriptor -> Bool -> LibM EDec
+generateElmDef :: TypeDescriptor -> Bool -> GenM EDec
 generateElmDef td needPoly =
   case td of
     TEmpty (MData a _ _) tvars _ ->
@@ -505,12 +505,12 @@ getTypeVars tds needPoly =
     then renderTypeVar <$> tds
     else []
 
-generateElmDecTHCS :: [Con] -> LibM ECons
+generateElmDecTHCS :: [Con] -> GenM ECons
 generateElmDecTHCS cs = do
   a <- mapM generateElmDecTHC cs
   pure $ ESum a
 
-generateElmDecTHC :: Con -> LibM ECons
+generateElmDecTHC :: Con -> GenM ECons
 generateElmDecTHC (NormalC n tx) = do
   ds <- mapM (\(_, t) -> wrapInPara <$> renderTHType t) tx
   pure $ EProduct (pack $ nameToText n) ds
@@ -524,12 +524,12 @@ generateElmDecTHC (RecC n tx) = do
   pure $ ERecord (pack $ nameToText n) ds
 generateElmDecTHC _ = error "Not implemented"
 
-generateElmDefC :: Constructors -> LibM ECons
+generateElmDefC :: Constructors -> GenM ECons
 generateElmDefC cds = do
   cDefs <- mapM generateElmDefCD $ NE.toList cds
   pure $ ESum cDefs
 
-generateElmDefCD :: ConstructorDescriptor -> LibM ECons
+generateElmDefCD :: ConstructorDescriptor -> GenM ECons
 generateElmDefCD cd =
   case cd of
     RecordConstructor cname nfs -> do
@@ -540,16 +540,16 @@ generateElmDefCD cd =
       pure $ EProduct cname rfs
     NullaryConstructor cname -> pure $ ENullary cname
 
-generateRecordFields :: NE.NonEmpty (Text, TypeDescriptor) -> LibM [ENamedField]
+generateRecordFields :: NE.NonEmpty (Text, TypeDescriptor) -> GenM [ENamedField]
 generateRecordFields fs =
   case fs of
     (nf :| []) -> mapM mapFn [nf]
     n -> mapM mapFn $ NE.toList n
   where
-    mapFn :: (Text, TypeDescriptor) -> LibM ENamedField
+    mapFn :: (Text, TypeDescriptor) -> GenM ENamedField
     mapFn (a, b) = do
       x <- renderType b
       pure (a, x)
 
-generateUnNamedFields :: NE.NonEmpty TypeDescriptor -> LibM [Text]
+generateUnNamedFields :: NE.NonEmpty TypeDescriptor -> GenM [Text]
 generateUnNamedFields fds = mapM renderType $ NE.toList fds

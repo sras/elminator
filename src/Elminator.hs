@@ -1,51 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-{-|
-
-Generate Elm type definitions, encoders and decoders from Haskell data types.
-
-@
-  \{\-\#Language ScopedTypeVariables\#-\}
-  \{\-\#Language FlexibleInstances\#-\}
-  \{\-\#Language DeriveAnyClass\#-\}
-  \{\-\#Language OverloadedStrings\#-\}
-
-  module Lib  where
-
-  import Elminator
-  import GHC.Generics
-
-  data SingleCon = SingleCon (Maybe Int) String deriving (Generic, ToHType)
-  data WithMaybesPoly a b =
-    WithMaybesPoly
-      { mbpF1 :: Maybe a
-      , mbpF2 :: Maybe b
-      }
-    deriving (Generic, ToHType)
-
-@
-
-Here is how we generate Elm source for the above defined types.
-
-@
-\{\-\#Language OverloadedStrings\#-\}
-\{\-\#Language TemplateHaskell\#-\}
-
-module CodeGen where
-
-import Data.Proxy
-import Elminator
-import Data.Text
-
-import Lib
-
-elmSource :: Text
-elmSource = $(generateFor Elm19 myDefaultOptions (Just ".\/elm-app\/src\/Autogen.elm") $ do
-  include (Proxy :: Proxy SingleCon) $ Everything Mono
-  include (Proxy :: Proxy (WithMaybesPoly (Maybe String) Float)) $ Definiton Poly
-
-@
--}
+-- | Generate Elm type definitions, encoders and decoders from Haskell data types.
 module Elminator
   ( module Elminator
   , ElmVersion(..)
@@ -67,7 +22,7 @@ import qualified Data.Map.Strict as DMS
 import Data.Proxy
 import Data.Text as T
 import Data.Text.IO as T
-import qualified Elminator.Elm as Elm
+import qualified Elminator.ELM.Generator as Elm
 import Elminator.Generics.Simple
 import Elminator.Lib
 import Language.Haskell.TH
@@ -99,7 +54,7 @@ generateFor ev opt mfp sc =
       r = do
         srcs <- mapM generateOne $ DMS.elems gc
         front <- Elm.elmFront
-        pure $ (front, T.intercalate "" srcs)
+        pure (front, T.intercalate "" srcs)
    in do ((front, exprtxt), exinfo) <- runReaderT (runWriterT r) (ev, gc)
          let fSrc = T.concat [front $ toImport exinfo, "\n\n", exprtxt]
          case mfp of
@@ -118,10 +73,10 @@ generateFor ev opt mfp sc =
       in_
     toExp :: Text -> Exp
     toExp t = LitE $ StringL $ unpack t
-    generateOne :: ([GenOption], HType) -> LibM Text
+    generateOne :: ([GenOption], HType) -> GenM Text
     generateOne (gs, ht) = do
       srcs <- mapM (generateOne_ ht) gs
       pure $ T.intercalate "" srcs
       where
-        generateOne_ :: HType -> GenOption -> LibM Text
+        generateOne_ :: HType -> GenOption -> GenM Text
         generateOne_ h d = Elm.generateElm d h opt

@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Elminator.ELM.CodeGen where
+module Elminator.ELM.Render where
 
 import Control.Monad.State.Lazy
 import qualified Data.List as DL

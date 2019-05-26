@@ -4,7 +4,7 @@ module Elminator.Lib
   ( TypeDescriptor(..)
   , PolyConfig(..)
   , GenOption(..)
-  , LibM
+  , GenM
   , Decoder(..)
   , ConName
   , ConTag
@@ -65,12 +65,7 @@ data Decoder
   | DTwoElement [(ConName, ConTag, ContentDecoder)]
   | DUntagged [(ConName, ContentDecoder)]
 
-type LibM = WriterT [ExItem] (ReaderT (ElmVersion, GenConfig) Q)
-
-_runLibM :: (Show a) => LibM a -> Q Exp
-_runLibM l = do
-  (x, _) <- runReaderT (runWriterT l) (Elm0p19, DMS.empty)
-  pure $ LitE $ StringL $ show x
+type GenM = WriterT [ExItem] (ReaderT (ElmVersion, GenConfig) Q)
 
 -- | Decides wether the type definition will be polymorphic.
 data PolyConfig
@@ -126,7 +121,7 @@ data ConstructorDescriptor
   | NullaryConstructor Text
   deriving (Show)
 
-getInfo :: Text -> LibM ([Name], [Con])
+getInfo :: Text -> GenM ([Name], [Con])
 getInfo tnString =
   W.lift $
   R.lift $ do
@@ -139,7 +134,7 @@ getInfo tnString =
         error $
         unpack $ T.concat ["Cannot find type with name ", tnString, " in scope"]
 
-toTypeDescriptor :: HType -> LibM TypeDescriptor
+toTypeDescriptor :: HType -> GenM TypeDescriptor
 toTypeDescriptor (HUDef udata) =
   case udata of
     UDefData mdata@(MData tnString _ _) targs hcons -> do
@@ -165,14 +160,14 @@ toTypeDescriptor (HExternal e) = do
   tds <- mapM toTypeDescriptor $ exTypeArgs e
   pure $ TExternal e {exTypeArgs = tds}
 
-mkTdConstructor :: HConstructor -> LibM ConstructorDescriptor
+mkTdConstructor :: HConstructor -> GenM ConstructorDescriptor
 mkTdConstructor hc =
   case hc of
     HConstructor (CName cname) fields ->
       case fields of
         [] -> pure $ NullaryConstructor cname
         hfields@(HField (Just _) _:_) ->
-          let mapFn :: HField -> LibM (Text, TypeDescriptor)
+          let mapFn :: HField -> GenM (Text, TypeDescriptor)
               mapFn (HField Nothing _) = error "Unexpected unnamed field"
               mapFn (HField (Just n) x) = do
                 td <- toTypeDescriptor x
@@ -180,7 +175,7 @@ mkTdConstructor hc =
            in do a <- mapM mapFn hfields
                  pure $ RecordConstructor cname $ NE.fromList a
         hfields@(HField _ _:_) ->
-          let mapFn :: HField -> LibM TypeDescriptor
+          let mapFn :: HField -> GenM TypeDescriptor
               mapFn (HField _ td) = toTypeDescriptor td
            in do a <- mapM mapFn hfields
                  pure $ SimpleConstructor cname $ NE.fromList a
@@ -235,7 +230,7 @@ renderTypeHead td =
     TRecusrive md -> _mTypeName md
     x -> error ("Unimplemented" ++ show x)
 
-renderType :: TypeDescriptor -> LibM Text
+renderType :: TypeDescriptor -> GenM Text
 renderType td = do
   hp <-
     case getMd td of
@@ -265,14 +260,14 @@ renderType td = do
              pure $ T.concat [snd $ exType ei, " ", T.intercalate " " ta]
     else pure $ renderTypeHead td
   where
-    renderFn :: TypeDescriptor -> TypeVar -> LibM Text
+    renderFn :: TypeDescriptor -> TypeVar -> GenM Text
     renderFn _ (Phantom n) = pure $ pack $ nameToText n
     renderFn tdr (Used _) = renderType tdr
 
 wrapInPara :: Text -> Text
 wrapInPara i = T.concat ["(", i, ")"]
 
-renderTHType :: Type -> LibM Text
+renderTHType :: Type -> GenM Text
 renderTHType (VarT n) = pure $ pack $ nameToText n
 renderTHType a@(AppT t1 t2) =
   case findTuple a of
@@ -310,7 +305,7 @@ findTuple (AppT t1 t2) = do
   pure $ DL.reverse (t2 : xs)
 findTuple _ = error "Not implemented"
 
-hasPoly :: MData -> LibM Bool
+hasPoly :: MData -> GenM Bool
 hasPoly tn = do
   (_, x) <- ask
   case DMS.lookup tn x of
@@ -386,7 +381,7 @@ getCName (RecordConstructor x _) = x
 getCName (SimpleConstructor x _) = x
 getCName (NullaryConstructor x) = x
 
-collectExtRefs :: TypeDescriptor -> LibM ()
+collectExtRefs :: TypeDescriptor -> GenM ()
 collectExtRefs (TExternal (ExInfo ei (Just en) (Just de) _)) = tell [ei, en, de]
 collectExtRefs (TExternal (ExInfo ei _ _ _)) = tell [ei]
 collectExtRefs (TEmpty _ _ targs) = mapM_ collectExtRefs targs

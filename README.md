@@ -125,6 +125,6 @@ If you are using the Stack tool, then for the time being, you have to add Elmina
 
 ```yaml
 extra-deps:
-  elminator-0.1.0.0
+  elminator-0.2.0.0
 ```
 

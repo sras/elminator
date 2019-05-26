@@ -65,11 +65,11 @@ data Decoder
   | DTwoElement [(ConName, ConTag, ContentDecoder)]
   | DUntagged [(ConName, ContentDecoder)]
 
-type LibM = WriterT [ExItem] (ReaderT GenConfig Q)
+type LibM = WriterT [ExItem] (ReaderT (ElmVersion, GenConfig) Q)
 
 _runLibM :: (Show a) => LibM a -> Q Exp
 _runLibM l = do
-  (x, _) <- runReaderT (runWriterT l) DMS.empty
+  (x, _) <- runReaderT (runWriterT l) (Elm0p19, DMS.empty)
   pure $ LitE $ StringL $ show x
 
 -- | Decides wether the type definition will be polymorphic.
@@ -92,8 +92,9 @@ type GenConfig = DMS.Map MData ([GenOption], HType)
 type Builder = State GenConfig ()
 
 -- | Specify Elm version to generate code for
-data ElmVersion =
-  Elm0p19
+data ElmVersion
+  = Elm0p18
+  | Elm0p19
 
 -- | Contains the type arguments of a type
 -- | with info regarding if they are Phantom
@@ -311,7 +312,7 @@ findTuple _ = error "Not implemented"
 
 hasPoly :: MData -> LibM Bool
 hasPoly tn = do
-  x <- ask
+  (_, x) <- ask
   case DMS.lookup tn x of
     Just b -> pure $ hasPoly' b
     Nothing -> pure True

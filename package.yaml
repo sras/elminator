@@ -32,7 +32,9 @@ library:
     - Elminator.Generics.Simple
     - Elminator.ELM.CodeGen
     - Elminator.Lib
+    - Elminator.Elm
     - Elminator.Elm19
+    - Elminator.Elm18
 
 tests:
   elminator-test:

@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Elminator.Elm19 where
+module Elminator.Elm18 where
 
 import Data.Text as T
 import Elminator.ELM.CodeGen
@@ -22,8 +22,8 @@ elmFront imports =
   \    mapFn v = D.map (\\x -> x v) inDec\n\
   \  in D.andThen mapFn oDec\n\
   \\n\
-  \elminatorEncodeList0p19 : (a -> E.Value)-> List a -> E.Value\n\
-  \elminatorEncodeList0p19 fn ls = E.list fn ls\n\
+  \elminatorEncodeList0p18 : (a -> E.Value)-> List a -> E.Value\n\
+  \elminatorEncodeList0p18 fn ls = E.list (List.map fn ls)\n\
   \\n\
   \encodeMaybe : (a -> E.Value)-> Maybe a -> E.Value\n\
   \encodeMaybe fn ma = case ma of\n\
@@ -32,4 +32,4 @@ elmFront imports =
     ]
 
 listEncoder :: EExpr
-listEncoder = "elminatorEncodeList0p19"
+listEncoder = "elminatorEncodeList0p18"

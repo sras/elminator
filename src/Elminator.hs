@@ -67,7 +67,7 @@ import qualified Data.Map.Strict as DMS
 import Data.Proxy
 import Data.Text as T
 import Data.Text.IO as T
-import qualified Elminator.Elm19 as Elm19
+import qualified Elminator.Elm as Elm
 import Elminator.Generics.Simple
 import Elminator.Lib
 import Language.Haskell.TH
@@ -98,9 +98,10 @@ generateFor ev opt mfp sc =
   let (_, gc) = runState sc DMS.empty
       r = do
         srcs <- mapM generateOne $ DMS.elems gc
-        pure $ T.intercalate "" srcs
-   in do (exprtxt, exinfo) <- runReaderT (runWriterT r) gc
-         let fSrc = T.concat [Elm19.elmFront $ toImport exinfo, "\n\n", exprtxt]
+        front <- Elm.elmFront
+        pure $ (front, T.intercalate "" srcs)
+   in do ((front, exprtxt), exinfo) <- runReaderT (runWriterT r) (ev, gc)
+         let fSrc = T.concat [front $ toImport exinfo, "\n\n", exprtxt]
          case mfp of
            Just fp -> runIO $ T.writeFile fp fSrc
            Nothing -> pure ()
@@ -123,6 +124,4 @@ generateFor ev opt mfp sc =
       pure $ T.intercalate "" srcs
       where
         generateOne_ :: HType -> GenOption -> LibM Text
-        generateOne_ h d =
-          case ev of
-            Elm0p19 -> Elm19.generateElm d h opt
+        generateOne_ h d = Elm.generateElm d h opt

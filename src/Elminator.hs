@@ -51,7 +51,6 @@ module Elminator
   , ElmVersion(..)
   , HType(..)
   , ToHType(..)
-  , ExItem(..)
   , ExInfo(..)
   , Builder
   , GenOption(..)
@@ -87,7 +86,7 @@ include p dc = do
       HMaybe _ -> error "Direct encoding of maybe type is not supported"
       HList _ -> error "Direct encoding of list type is not supported"
       HRecursive _ -> error "Unexpected meta data"
-      HExternal _ _ -> error "Cannot generate code for external types"
+      HExternal _ -> error "Cannot generate code for external types"
   s <- get
   put $ DMS.insertWith (\(a, b) (ea, _) -> (ea ++ a, b)) mdata ([dc], hType) s
 
@@ -110,10 +109,7 @@ generateFor ev opt mfp sc =
     toImport :: [ExItem] -> Text
     toImport exs =
       let map_ =
-            DL.foldr
-              (\(ExItem m s) mp -> DMS.insertWith (++) m [s] mp)
-              DMS.empty
-              exs
+            DL.foldr (\(m, s) mp -> DMS.insertWith (++) m [s] mp) DMS.empty exs
        in T.intercalate "\n" $ DMS.foldrWithKey' foldFn [] map_
     foldFn :: Text -> [Text] -> [Text] -> [Text]
     foldFn mod_ smbs in_ =
@@ -129,4 +125,4 @@ generateFor ev opt mfp sc =
         generateOne_ :: HType -> GenOption -> LibM Text
         generateOne_ h d =
           case ev of
-            Elm19 -> Elm19.generateElm d h opt
+            Elm0p19 -> Elm19.generateElm d h opt

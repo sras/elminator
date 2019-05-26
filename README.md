@@ -1,18 +1,18 @@
 # Elminator
 
-Generate Elm type definitions and json encoders/decoders from Haskell source.
+Generate Elm type definitions and JSON encoders/decoders from Haskell source.
 
-1. Supports generation of polymorphic types in Elm including types with phantom type variables.
+1. Supports generation of polymorphic types (as well as concrete ones) in Elm from possibly polymorphic Haskell types, including types with phantom type variables.
 2. Supports generation of direct and indirect recursive types as long as the recursive types are not polymorphic.
 3. Generates code that does not depend on external Elm libraries.
 4. Does not have limits on the number of fields that the constructors of your type can have.
-5. Supports json encoding options exported by the Aeson library comprehensively.
+5. Supports JSON encoding options exported by the Aeson library comprehensively.
 6. Supports generation of code that depend on user defined types and encoders/decoders in Elm.
 
 ### How to use?
 
 To generate Elm code for a Haskell type, the Haskell type needs to have an instance of the `ToHType` type class.
-This can be automatically derivied, provided all your constructor field types have `ToHType` instances. A sample can be seen below. Please note that language extensions `DeriveGeneric` and `DeriveAnyClass` should be enabled to make this work.
+This can be automatically derived, provided all your constructor field types have `ToHType` instances. A sample can be seen below. Please note that language extensions `DeriveGeneric` and `DeriveAnyClass` should be enabled to make this work.
 
 ```haskell
 {-# Language DeriveGeneric #-}
@@ -27,7 +27,7 @@ data SingleCon = SingleCon Int String deriving (Generic, ToHType)
 
 ```
 
-Since this library uses template haskell to look up type information (in addition to Generics), we need to run the code generation code in a template Haskell splice. 
+Since this library uses template Haskell to look up type information (in addition to Generics), we need to run the code generation code in a template Haskell splice. 
 A usage sample can be seen in the following code used in the round trip tests for this library.
 
 
@@ -45,42 +45,46 @@ import Data.Text
 import Lib
 
 elmSource :: Text
-elmSource = $(generateFor Elm19 myDefaultOptions (Just "elm-app/src/Autogen.elm") $ do
-  include (Proxy :: Proxy SingleCon) $ Everything Mono
-  include (Proxy :: Proxy SingleRecCon) $ Everything Mono
-  include (Proxy :: Proxy SingleConOneField)$ Everything Mono
-  include (Proxy :: Proxy SingleRecConOneField) $ Everything Mono
-  include (Proxy :: Proxy TwoCons) $ Everything Mono 
-  include (Proxy :: Proxy TwoRecCons) $ Everything Mono 
-  include (Proxy :: Proxy BigCon) $ Everything Mono 
-  include (Proxy :: Proxy BigRecCon) $ Everything Mono 
-  include (Proxy :: Proxy MixedCons) $ Everything Mono 
-  include (Proxy :: Proxy Comment) $ Everything Mono 
-  include (Proxy :: Proxy WithMaybes) $ Everything Mono
-  include (Proxy :: Proxy WithSimpleMaybes) $ Everything Mono 
-  include (Proxy :: Proxy (WithMaybesPoly (Maybe String) Float)) $ Definiton Poly
-  include (Proxy :: Proxy (WithMaybesPoly (Maybe String) Float)) $ EncoderDecoder
-  include (Proxy :: Proxy (Phantom ())) $ Everything Poly
-  include (Proxy :: Proxy (TypeWithPhantom Float)) $ Everything Poly
-  include (Proxy :: Proxy RecWithList) $ Everything Mono
-  include (Proxy :: Proxy IndRecStart) $ Everything Mono
-  include (Proxy :: Proxy IndRec2) $ Everything Mono
-  include (Proxy :: Proxy IndRec3) $ Everything Mono
-  include (Proxy :: Proxy NTSingleCon) $ Everything Mono
-  include (Proxy :: Proxy NTSingleCon2) $ Everything Poly
-  include (Proxy :: Proxy Tuples) $ Everything Mono
-  include (Proxy :: Proxy NestedTuples) $ Everything Mono
-  include (Proxy :: Proxy (TypeWithExt ())) $ Everything Poly
-  include (Proxy :: Proxy (WithEmptyTuple ())) $ Everything Poly
-  include (Proxy :: Proxy (Phantom2 ())) $ Everything Poly
-  include (Proxy :: Proxy PhantomWrapper) $ Everything Poly
-  )
+elmSource =
+  $(generateFor Elm0p19 myDefaultOptions (Just "./elm-app/src/Autogen.elm") $ do
+      include (Proxy :: Proxy SingleCon) $ Everything Mono
+      include (Proxy :: Proxy SingleRecCon) $ Everything Mono
+      include (Proxy :: Proxy SingleConOneField) $ Everything Mono
+      include (Proxy :: Proxy SingleRecConOneField) $ Everything Mono
+      include (Proxy :: Proxy TwoCons) $ Everything Mono
+      include (Proxy :: Proxy TwoRecCons) $ Everything Mono
+      include (Proxy :: Proxy BigCon) $ Everything Mono
+      include (Proxy :: Proxy BigRecCon) $ Everything Mono
+      include (Proxy :: Proxy MixedCons) $ Everything Mono
+      include (Proxy :: Proxy Comment) $ Everything Mono
+      include (Proxy :: Proxy WithMaybes) $ Everything Mono
+      include (Proxy :: Proxy WithSimpleMaybes) $ Everything Mono
+      include (Proxy :: Proxy (WithMaybesPoly (Maybe String) Float)) $
+        Definiton Poly
+      include
+        (Proxy :: Proxy (WithMaybesPoly (Maybe String) Float))
+        EncoderDecoder
+      include (Proxy :: Proxy (Phantom ())) $ Everything Poly
+      include (Proxy :: Proxy (TypeWithPhantom Float)) $ Everything Poly
+      include (Proxy :: Proxy RecWithList) $ Everything Mono
+      include (Proxy :: Proxy IndRecStart) $ Everything Mono
+      include (Proxy :: Proxy IndRec2) $ Everything Mono
+      include (Proxy :: Proxy IndRec3) $ Everything Mono
+      include (Proxy :: Proxy NTSingleCon) $ Everything Mono
+      include (Proxy :: Proxy NTSingleCon2) $ Everything Poly
+      include (Proxy :: Proxy Tuples) $ Everything Mono
+      include (Proxy :: Proxy NestedTuples) $ Everything Mono
+      include (Proxy :: Proxy (NestedTuplesPoly ())) $ Definiton Poly
+      include (Proxy :: Proxy (TypeWithExt ())) $ Everything Poly
+      include (Proxy :: Proxy (WithEmptyTuple ())) $ Everything Poly
+      include (Proxy :: Proxy (Phantom2 ())) $ Everything Poly
+      include (Proxy :: Proxy PhantomWrapper) $ Everything Poly)
 
 -- The `generateFor` function accepts an elm version (only Elm19 as of now), a value of type `Options` from the Aeson library
 -- , and optional `FilePath` to which the generated source will be written to, and a `Builder` value.
 -- The `Builder` is just a `State` monad that aggregates the configuration parameters from the include
 -- calls. The first parameter of the include function is a `proxy` value that denotes the type that requires Elm code generation.
--- The second value is a value of type `GenOption` that selects which entites needs to be generation, and also selects if the
+-- The second value is a value of type `GenOption` that selects which entities needs to be generation, and also selects if the
 -- type generated at Elm should be polymorphic. It is defined as follows.
 
 data GenOption
@@ -109,15 +113,15 @@ instance (ToHType a, ToHType b) => ToHType (MyExtType a b) where
     pure $
       HExternal
         (ExInfo
-          (ExItem "Lib" "MyExtType") 
-          (Just $ ExItem "Lib" "encodeMyExtType")
-          (Just $ ExItem "Lib" "decodeMyExtType"))
-        [ha, hb]
+           ("External", "MyExtType")
+           (Just ("External", "encodeMyExtType"))
+           (Just ("External", "decodeMyExtType"))
+           [ha, hb])
 ```
 
 ### Installing
 
-If you are using the Stack tool, then for the time being, you have to add Elminator to the extra deps section of stack.yaml as follows.
+If you are using the Stack tool, then for the time being, you have to add Elminator to the 'extra-deps' section of stack.yaml as follows.
 
 ```yaml
 extra-deps:

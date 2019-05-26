@@ -93,7 +93,7 @@ type Builder = State GenConfig ()
 
 -- | Specify Elm version to generate code for
 data ElmVersion =
-  Elm19
+  Elm0p19
 
 -- | Contains the type arguments of a type
 -- | with info regarding if they are Phantom
@@ -114,8 +114,8 @@ data TypeDescriptor
   | TTuple [TypeDescriptor]
   | TPrimitive MData
   | TRecusrive MData
-  | TExternal ExInfo [TypeDescriptor]
-  deriving (Show, Eq)
+  | TExternal (ExInfo TypeDescriptor)
+  deriving (Show)
 
 type Constructors = NE.NonEmpty ConstructorDescriptor
 
@@ -123,7 +123,7 @@ data ConstructorDescriptor
   = RecordConstructor Text (NE.NonEmpty (Text, TypeDescriptor))
   | SimpleConstructor Text (NE.NonEmpty TypeDescriptor)
   | NullaryConstructor Text
-  deriving (Show, Eq)
+  deriving (Show)
 
 getInfo :: Text -> LibM ([Name], [Con])
 getInfo tnString =
@@ -160,9 +160,9 @@ toTypeDescriptor (HPrimitive md) = pure $ TPrimitive md
 toTypeDescriptor (HList ht) = TList <$> toTypeDescriptor ht
 toTypeDescriptor (HMaybe ht) = TMaybe <$> toTypeDescriptor ht
 toTypeDescriptor (HRecursive m) = pure $ TRecusrive m
-toTypeDescriptor (HExternal e hts) = do
-  tds <- mapM toTypeDescriptor hts
-  pure $ TExternal e tds
+toTypeDescriptor (HExternal e) = do
+  tds <- mapM toTypeDescriptor $ exTypeArgs e
+  pure $ TExternal e {exTypeArgs = tds}
 
 mkTdConstructor :: HConstructor -> LibM ConstructorDescriptor
 mkTdConstructor hc =
@@ -259,9 +259,9 @@ renderType td = do
              pure $ T.concat ["(", T.intercalate ", " ta, ")"]
            TPrimitive md -> pure $ _mTypeName md
            TRecusrive md -> pure $ _mTypeName md
-           TExternal ei targs -> do
-             ta <- mapM renderType targs
-             pure $ T.concat [extSymbol $ exType ei, " ", T.intercalate " " ta]
+           TExternal ei -> do
+             ta <- mapM renderType $ exTypeArgs ei
+             pure $ T.concat [snd $ exType ei, " ", T.intercalate " " ta]
     else pure $ renderTypeHead td
   where
     renderFn :: TypeDescriptor -> TypeVar -> LibM Text
@@ -386,8 +386,8 @@ getCName (SimpleConstructor x _) = x
 getCName (NullaryConstructor x) = x
 
 collectExtRefs :: TypeDescriptor -> LibM ()
-collectExtRefs (TExternal (ExInfo ei (Just en) (Just de)) _) = tell [ei, en, de]
-collectExtRefs (TExternal (ExInfo ei _ _) _) = tell [ei]
+collectExtRefs (TExternal (ExInfo ei (Just en) (Just de) _)) = tell [ei, en, de]
+collectExtRefs (TExternal (ExInfo ei _ _ _)) = tell [ei]
 collectExtRefs (TEmpty _ _ targs) = mapM_ collectExtRefs targs
 collectExtRefs (TOccupied _ _ _ cons_) =
   mapM_ collectExtRefs $ getConstructorsFields cons_

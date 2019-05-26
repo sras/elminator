@@ -391,9 +391,9 @@ getEncoderExpr _ (TPrimitive n) = EName $ getPrimitiveEncoder $ _mTypeName n
 getEncoderExpr idx (TList x) = EFuncApp "E.list" (getEncoderExpr idx x)
 getEncoderExpr idx (TMaybe x) = EFuncApp "encodeMaybe" (getEncoderExpr idx x)
 getEncoderExpr _ (TRecusrive md) = EName $ T.concat ["encode", _mTypeName md]
-getEncoderExpr _ (TExternal (ExInfo _ (Just ei) _) _) =
-  EName $ T.concat [extSymbol ei]
-getEncoderExpr _ (TExternal (ExInfo {}) _) = error "Encoder not found"
+getEncoderExpr _ (TExternal (ExInfo _ (Just ei) _ _)) =
+  EName $ T.concat [snd ei]
+getEncoderExpr _ (TExternal (ExInfo {})) = error "Encoder not found"
 getEncoderExpr _ _ = error "Encoder not found"
 
 getDecoderExpr :: Int -> TypeDescriptor -> EExpr
@@ -414,8 +414,8 @@ getDecoderExpr idx td =
             EFuncApp "D.lazy" $
             ELambda $ EName $ T.concat ["decode", _mTypeName md]
           TMaybe x -> (EFuncApp "D.maybe" (getDecoderExpr idx x))
-          TExternal (ExInfo _ _ (Just ei)) _ -> EName $ T.concat [extSymbol ei]
-          TExternal ExInfo {} _ -> error "Decoder not found"
+          TExternal (ExInfo _ _ (Just ei) _) -> EName $ T.concat [snd ei]
+          TExternal ExInfo {} -> error "Decoder not found"
    in if checkRecursion td
         then EFuncApp "D.lazy" $ ELambda expr
         else expr
@@ -428,7 +428,7 @@ checkRecursion td_ =
     TMaybe td -> checkRecursion td
     TPrimitive _ -> False
     TRecusrive _ -> True
-    TExternal _ _ -> False
+    TExternal _ -> False
     TTuple tds -> or $ checkRecursion <$> tds
     TEmpty {} -> False
   where

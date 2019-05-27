@@ -121,7 +121,7 @@ instance (ToHType a, ToHType b) => ToHType (MyExtType a b) where
 
 ### Installing
 
-If you are using the Stack tool, then for the time being, you have to add Elminator to the 'extra-deps' section of stack.yaml as follows.
+If you are using the Stack tool, then for the time being, you have to add Elminator to the 'extra-deps' section of stack.yaml as follows (Please use the latest available version here).
 
 ```yaml
 extra-deps:

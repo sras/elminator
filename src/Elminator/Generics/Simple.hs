@@ -16,7 +16,9 @@ import qualified Data.List as DL
 import qualified Data.Map.Strict as DMS
 import Data.Proxy
 import Data.String
-import Data.Text as T
+import Data.Text (Text, pack)
+import qualified Data.Text as T
+import Data.Typeable
 import GHC.Generics
 import GHC.TypeLits
 import Language.Haskell.TH
@@ -213,18 +215,8 @@ instance (ToHConstructor_ a, ToHConstructor_ b) =>
 instance (ToHType a) => ToHType_ (K1 R a) where
   toHType_ _ = toHType (Proxy :: Proxy a)
 
--- Primitive instances
-instance ToHType Char where
-  toHType _ = pure $ HPrimitive (MData "Char" "" "")
-
-instance ToHType Int where
-  toHType _ = pure $ HPrimitive (MData "Int" "" "")
-
-instance ToHType Float where
-  toHType _ = pure $ HPrimitive (MData "Float" "" "")
-
-instance ToHType Bool where
-  toHType _ = pure $ HPrimitive (MData "Bool" "" "")
+instance {-# OVERLAPPABLE #-} (Typeable a) => ToHType a where
+  toHType p = pure $ mkHType p
 
 -- Common types
 instance (ToHType a, ToHType b) => ToHType (Either a b)
@@ -234,6 +226,9 @@ instance (ToHType a) => ToHType (Maybe a) where
     htype <- toHType (Proxy :: Proxy a)
     pure $ HMaybe htype
 
+-- We need these tuple instances despite of the general ToHType instance
+-- because we need to special case tupless to exclude them from recursion
+-- tracking, which is included in the default implementation if ToHType class
 instance ToHType ()
 
 instance (ToHType a1, ToHType a2) => ToHType (a1, a2)
@@ -270,5 +265,18 @@ instance (ToHType a) => ToHType [a] where
     htype <- toHType (Proxy :: Proxy a)
     pure $
       case htype of
-        HPrimitive (MData "Char" _ _) -> HPrimitive (MData "String" "" "")
+        HPrimitive md@(MData "Char" _ _) ->
+          HPrimitive $ md {_mTypeName = "String"}
         hta -> HList hta
+
+instance ToHType Text where
+  toHType _ = toHType (Proxy :: Proxy String)
+
+mkHType :: (Typeable a) => Proxy a -> HType
+mkHType p =
+  let tname = typeRepTyCon $ typeRep p
+   in HPrimitive
+        (MData
+           (pack $ tyConName tname)
+           (pack $ tyConModule tname)
+           (pack $ tyConPackage tname))

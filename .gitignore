@@ -4,3 +4,4 @@ elminator.cabal
 dist
 dist-newstyle
 .ghc*
+tags

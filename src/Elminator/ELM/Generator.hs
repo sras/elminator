@@ -107,7 +107,7 @@ generateElm d h opts = do
 
 generateDecoder :: (TypeDescriptor, Decoder) -> GenM EDec
 generateDecoder (td, decoder) = do
-  tdisplay <- renderType td
+  tdisplay <- renderType td True
   case td of
     (TOccupied md _ _ _) -> fn (_mTypeName md) tdisplay
     _ -> error "Encoders/decoders can only be made for user defined types"
@@ -267,7 +267,7 @@ mkTupleMaker tmName idx fds =
 
 generateEncoder :: (TypeDescriptor, Decoder) -> GenM EDec
 generateEncoder (td, decoder) = do
-  tdisplay <- renderType td
+  tdisplay <- renderType td True
   case td of
     (TOccupied md _ _ _) -> fn (_mTypeName md) tdisplay
     _ -> error "Encoders/decoders can only be made for user defined types"
@@ -448,6 +448,7 @@ getDecoderExpr idx td =
           TMaybe x -> (EFuncApp "D.maybe" (getDecoderExpr idx x))
           TExternal (ExInfo _ _ (Just ei) _) -> EName $ T.concat [snd ei]
           TExternal ExInfo {} -> error "Decoder not found"
+          TVar _ -> error "Decoder not found"
    in if checkRecursion td
         then EFuncApp "D.lazy" $ ELambda expr
         else expr
@@ -463,6 +464,7 @@ checkRecursion td_ =
     TExternal _ -> False
     TTuple tds -> or $ checkRecursion <$> tds
     TEmpty {} -> False
+    TVar _ -> False
   where
     getTypeDescriptors :: Constructors -> [TypeDescriptor]
     getTypeDescriptors ncd = P.concat $ NE.toList $ NE.map getFromCd ncd
@@ -494,7 +496,9 @@ generateElmDef td needPoly =
     TOccupied (MData a _ _) (ReifyInfo tvars cnstrs) _ c -> do
       defC <-
         if needPoly
-          then generateElmDecTHCS cnstrs
+          then case NE.nonEmpty cnstrs of
+                 Just nec -> generateElmDefC $ NE.zipWith injectTypeVars nec c
+                 Nothing -> error "No constructors obtained from reify"
           else generateElmDefC c
       pure $ EType a (getTypeVars tvars needPoly) defC
     _ -> error "Can only create definitions for use defined types"
@@ -505,24 +509,51 @@ getTypeVars tds needPoly =
     then renderTypeVar <$> tds
     else []
 
-generateElmDecTHCS :: [Con] -> GenM ECons
-generateElmDecTHCS cs = do
-  a <- mapM generateElmDecTHC cs
-  pure $ ESum a
+injectTypeVars :: Con -> ConstructorDescriptor -> ConstructorDescriptor
+injectTypeVars (RecC _ vbt) (RecordConstructor name flds) =
+  case NE.nonEmpty $ (\(_, _, t) -> t) <$> vbt of
+    Just tps -> RecordConstructor name (NE.zipWith zipFn tps flds)
+    Nothing -> error "Non empty fields expected"
+  where
+    zipFn :: Type -> (Text, TypeDescriptor) -> (Text, TypeDescriptor)
+    zipFn typ (n, td) = (n, injectTypeVarIntoTD typ td)
+injectTypeVars (NormalC _ bt) (SimpleConstructor name flds) =
+  case NE.nonEmpty $ snd <$> bt of
+    Just tps -> SimpleConstructor name (NE.zipWith injectTypeVarIntoTD tps flds)
+    Nothing -> error "Non empty fields expected"
+injectTypeVars _ n@(NullaryConstructor _) = n
+injectTypeVars _ _ = error "Constructor mismatch"
 
-generateElmDecTHC :: Con -> GenM ECons
-generateElmDecTHC (NormalC n tx) = do
-  ds <- mapM (\(_, t) -> wrapInPara <$> renderTHType t) tx
-  pure $ EProduct (pack $ nameToText n) ds
-generateElmDecTHC (RecC n tx) = do
-  ds <-
-    mapM
-      (\(nm, _, t) -> do
-         x <- renderTHType t
-         pure (pack $ nameToText nm, x))
-      tx
-  pure $ ERecord (pack $ nameToText n) ds
-generateElmDecTHC _ = error "Not implemented"
+injectTypeVarIntoTD :: Type -> TypeDescriptor -> TypeDescriptor
+injectTypeVarIntoTD (VarT n) _ = TVar n
+injectTypeVarIntoTD (AppT t1 t2) td =
+  case td of
+    TEmpty md tvr tds ->
+      let tailTd = injectTypeVarIntoTD t2 (Prelude.last tds)
+          TEmpty _ _ newtds =
+            injectTypeVarIntoTD t1 (TEmpty md tvr (Prelude.init tds))
+       in TEmpty md tvr $ newtds ++ [tailTd]
+    TOccupied md ri tds cnstrs ->
+      let tailTd = injectTypeVarIntoTD t2 (Prelude.last tds)
+          TOccupied _ _ newtds _ =
+            injectTypeVarIntoTD t1 (TOccupied md ri (Prelude.init tds) cnstrs)
+       in TOccupied md ri (newtds ++ [tailTd]) cnstrs
+    TTuple tds ->
+      let TTuple newtds = injectTypeVarIntoTD t1 (TTuple $ Prelude.init tds)
+          tailTd = injectTypeVarIntoTD t2 (Prelude.last tds)
+       in TTuple (newtds ++ [tailTd])
+    TExternal ei ->
+      let tds = exTypeArgs ei
+          tailTd = injectTypeVarIntoTD t2 (Prelude.last tds)
+          TExternal ExInfo {exTypeArgs = newTds} =
+            injectTypeVarIntoTD
+              t1
+              (TExternal $ ei {exTypeArgs = Prelude.init tds})
+       in TExternal $ ei {exTypeArgs = newTds ++ [tailTd]}
+    TMaybe tdc -> TMaybe $ injectTypeVarIntoTD t2 tdc
+    TList tdc -> TList $ injectTypeVarIntoTD t2 tdc
+    td_ -> td_
+injectTypeVarIntoTD _ td = td
 
 generateElmDefC :: Constructors -> GenM ECons
 generateElmDefC cds = do
@@ -548,8 +579,9 @@ generateRecordFields fs =
   where
     mapFn :: (Text, TypeDescriptor) -> GenM ENamedField
     mapFn (a, b) = do
-      x <- renderType b
+      x <- renderType b False
       pure (a, x)
 
 generateUnNamedFields :: NE.NonEmpty TypeDescriptor -> GenM [Text]
-generateUnNamedFields fds = mapM renderType $ NE.toList fds
+generateUnNamedFields fds =
+  mapM (\x -> wrapInPara <$> renderType x False) $ NE.toList fds

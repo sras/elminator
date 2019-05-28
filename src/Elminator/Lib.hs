@@ -21,7 +21,7 @@ module Elminator.Lib
   , ElmVersion(..)
   , renderTypeHead
   , renderType
-  , renderTHType
+  --, renderTHType
   , ReifyInfo(..)
   , nameToText
   , wrapInPara
@@ -111,6 +111,7 @@ data TypeDescriptor
   | TPrimitive MData
   | TRecusrive MData
   | TExternal (ExInfo TypeDescriptor)
+  | TVar Name
   deriving (Show)
 
 type Constructors = NE.NonEmpty ConstructorDescriptor
@@ -230,8 +231,8 @@ renderTypeHead td =
     TRecusrive md -> _mTypeName md
     x -> error ("Unimplemented" ++ show x)
 
-renderType :: TypeDescriptor -> GenM Text
-renderType td = do
+renderType :: TypeDescriptor -> Bool -> GenM Text
+renderType td showPhantom = do
   hp <-
     case getMd td of
       Nothing -> pure True
@@ -245,66 +246,67 @@ renderType td = do
              ta <- zipWithM renderFn targs tvars
              pure $ T.concat [_mTypeName md, " ", T.intercalate " " ta]
            TList wtd -> do
-             a <- renderType wtd
+             a <- renderType wtd showPhantom
              pure $ T.concat ["(List ", a, ")"]
            TMaybe wtd -> do
-             a <- renderType wtd
+             a <- renderType wtd showPhantom
              pure $ T.concat ["(Maybe ", a, ")"]
            TTuple tds -> do
-             ta <- mapM renderType tds
+             ta <- mapM (flip renderType showPhantom) tds
              pure $ T.concat ["(", T.intercalate ", " ta, ")"]
            TPrimitive md -> pure $ _mTypeName md
            TRecusrive md -> pure $ _mTypeName md
            TExternal ei -> do
-             ta <- mapM renderType $ exTypeArgs ei
+             ta <- mapM (flip renderType showPhantom) $ exTypeArgs ei
              pure $ T.concat [snd $ exType ei, " ", T.intercalate " " ta]
+           TVar name -> pure $ pack $ nameToText name
     else pure $ renderTypeHead td
   where
     renderFn :: TypeDescriptor -> TypeVar -> GenM Text
-    renderFn _ (Phantom n) = pure $ pack $ nameToText n
-    renderFn tdr (Used _) = renderType tdr
+    renderFn tdr (Phantom n) =
+      if showPhantom
+        then pure $ pack $ nameToText n
+        else renderFn tdr (Used n)
+    renderFn tdr (Used _) = renderType tdr showPhantom
 
 wrapInPara :: Text -> Text
 wrapInPara i = T.concat ["(", i, ")"]
 
-renderTHType :: Type -> GenM Text
-renderTHType (VarT n) = pure $ pack $ nameToText n
-renderTHType a@(AppT t1 t2) =
-  case findTuple a of
-    Just tx -> do
-      b <- mapM renderTHType tx
-      pure $ T.concat ["(", T.intercalate ", " b, ")"]
-    Nothing -> do
-      let rootType = getRootType a
-      hp <- hasPoly (MData rootType "" "")
-      if hp
-        then do
-          dt1 <- renderTHType t1
-          dt2 <- renderTHType t2
-          let dt2p =
-                case t2 of
-                  AppT _ _ -> T.concat ["(", dt2, ")"]
-                  _ -> dt2
-          pure $ T.concat [dt1, " ", dt2p]
-        else pure rootType
-renderTHType (ConT n) = pure $ pack $ nameToText n
-renderTHType _ = error "Not implemented"
-
-getRootType :: Type -> Text
-getRootType (ConT n) = pack $ nameToText n
-getRootType (VarT n) = pack $ nameToText n
-getRootType (AppT t1 _) = getRootType t1
-getRootType _ = error "Not implemented"
-
-findTuple :: Type -> Maybe [Type]
-findTuple (VarT _) = Nothing
-findTuple (ConT _) = Nothing
-findTuple (TupleT _) = Just []
-findTuple (AppT t1 t2) = do
-  xs <- findTuple t1
-  pure $ DL.reverse (t2 : xs)
-findTuple _ = error "Not implemented"
-
+--renderTHType :: Type -> GenM Text
+--renderTHType (VarT n) = pure $ pack $ nameToText n
+--renderTHType a@(AppT t1 t2) =
+--  case findTuple a of
+--    Just tx -> do
+--      b <- mapM renderTHType tx
+--      pure $ T.concat ["(", T.intercalate ", " b, ")"]
+--    Nothing -> do
+--      let rootType = getRootType a
+--      hp <- hasPoly (MData rootType "" "")
+--      if hp
+--        then do
+--          dt1 <- renderTHType t1
+--          dt2 <- renderTHType t2
+--          let dt2p =
+--                case t2 of
+--                  AppT _ _ -> T.concat ["(", dt2, ")"]
+--                  _ -> dt2
+--          pure $ T.concat [dt1, " ", dt2p]
+--        else pure rootType
+--renderTHType (ConT n) = pure $ pack $ nameToText n
+--renderTHType _ = error "Not implemented"
+--getRootType :: Type -> Text
+--getRootType (ConT n) = pack $ nameToText n
+--getRootType (VarT n) = pack $ nameToText n
+--getRootType (AppT t1 _) = getRootType t1
+--getRootType _ = error "Not implemented"
+--findTuple :: Type -> Maybe [Type]
+--findTuple (VarT _) = Nothing
+--findTuple (ConT _) = Nothing
+--findTuple (TupleT _) = Just []
+--findTuple (AppT t1 t2) = do
+--  xs <- findTuple t1
+--  pure $ DL.reverse (t2 : xs)
+--findTuple _ = error "Not implemented"
 hasPoly :: MData -> GenM Bool
 hasPoly tn = do
   (_, x) <- ask

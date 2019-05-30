@@ -187,7 +187,14 @@ contentDecoderToExp mcntFname cname cd =
     CDRecordRaw nfd@(_, _, td) ->
       let makerFnName = prependMk cname
           makerFn = mkRecorderMaker makerFnName cname [nfd]
-       in ELet [makerFn] $ aggregateDecoders makerFnName [getDecoderExpr 0 td]
+          agg = aggregateDecoders makerFnName [getDecoderExpr 0 td]
+       in ELet [makerFn] $
+          case mcntFname of
+            Just cntFname ->
+              EFuncApp
+                (EFuncApp "D.field" (ELiteral $ EStringL $ unpack cntFname))
+                agg
+            _ -> agg
     CDList tds ->
       let agg = aggregateDecoders cname $ zipWith zipFn [0 ..] tds
        in case mcntFname of

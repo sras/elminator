@@ -21,7 +21,6 @@ module Elminator.Lib
   , ElmVersion(..)
   , renderTypeHead
   , renderType
-  --, renderTHType
   , ReifyInfo(..)
   , nameToText
   , wrapInPara
@@ -64,6 +63,7 @@ data Decoder
   | DTagged Text Text [(ConName, ConTag, ContentDecoder)]
   | DTwoElement [(ConName, ConTag, ContentDecoder)]
   | DUntagged [(ConName, ContentDecoder)]
+  deriving (Show)
 
 type GenM = WriterT [ExItem] (ReaderT (ElmVersion, GenConfig) Q)
 
@@ -272,41 +272,6 @@ renderType td showPhantom = do
 wrapInPara :: Text -> Text
 wrapInPara i = T.concat ["(", i, ")"]
 
---renderTHType :: Type -> GenM Text
---renderTHType (VarT n) = pure $ pack $ nameToText n
---renderTHType a@(AppT t1 t2) =
---  case findTuple a of
---    Just tx -> do
---      b <- mapM renderTHType tx
---      pure $ T.concat ["(", T.intercalate ", " b, ")"]
---    Nothing -> do
---      let rootType = getRootType a
---      hp <- hasPoly (MData rootType "" "")
---      if hp
---        then do
---          dt1 <- renderTHType t1
---          dt2 <- renderTHType t2
---          let dt2p =
---                case t2 of
---                  AppT _ _ -> T.concat ["(", dt2, ")"]
---                  _ -> dt2
---          pure $ T.concat [dt1, " ", dt2p]
---        else pure rootType
---renderTHType (ConT n) = pure $ pack $ nameToText n
---renderTHType _ = error "Not implemented"
---getRootType :: Type -> Text
---getRootType (ConT n) = pack $ nameToText n
---getRootType (VarT n) = pack $ nameToText n
---getRootType (AppT t1 _) = getRootType t1
---getRootType _ = error "Not implemented"
---findTuple :: Type -> Maybe [Type]
---findTuple (VarT _) = Nothing
---findTuple (ConT _) = Nothing
---findTuple (TupleT _) = Just []
---findTuple (AppT t1 t2) = do
---  xs <- findTuple t1
---  pure $ DL.reverse (t2 : xs)
---findTuple _ = error "Not implemented"
 hasPoly :: MData -> GenM Bool
 hasPoly tn = do
   (_, x) <- ask
@@ -337,7 +302,7 @@ gdConstructor :: Constructors -> Options -> Decoder
 gdConstructor (cd :| []) opts =
   if tagSingleConstructors opts
     then gdTaggedWithConstructor [cd] opts
-    else DUntagged [(getCName cd, mkContentDecoder cd opts)]
+    else DUntagged [(getCName cd, mkContentDecoder True cd opts)]
 gdConstructor cds opts = gdTaggedWithConstructor (NE.toList cds) opts
 
 gdTaggedWithConstructor :: [ConstructorDescriptor] -> Options -> Decoder
@@ -347,27 +312,26 @@ gdTaggedWithConstructor cds opts =
     ObjectWithSingleField -> DUnderConKey cdPair
     TwoElemArray -> DTwoElement cdPair
     UntaggedValue ->
-      DUntagged $ (\cd -> (getCName cd, mkContentDecoder cd opts)) <$> cds
+      DUntagged $ (\cd -> (getCName cd, mkContentDecoder True cd opts)) <$> cds
   where
     cdPair :: [(ConName, ConTag, ContentDecoder)]
     cdPair =
       (\cd ->
          ( getCName cd
          , pack $ constructorTagModifier opts $ unpack $ getCName cd
-         , mkContentDecoder cd opts)) <$>
+         , mkContentDecoder False cd opts)) <$>
       cds
 
-mkContentDecoder :: ConstructorDescriptor -> Options -> ContentDecoder
-mkContentDecoder cd opts =
+mkContentDecoder :: Bool -> ConstructorDescriptor -> Options -> ContentDecoder
+mkContentDecoder overrideTaggConf cd opts =
   case cd of
     RecordConstructor _cname (nf :| []) ->
-      if unwrapUnaryRecords opts
-        then case sumEncoding opts of
-               ObjectWithSingleField -> CDRecordRaw $ modifyFieldLabel nf
-               TwoElemArray -> CDRecordRaw $ modifyFieldLabel nf
-               UntaggedValue -> CDRecordRaw $ modifyFieldLabel nf
-               TaggedObject _ _ -> CDRecord [modifyFieldLabel nf]
-        else CDRecord [modifyFieldLabel nf]
+      case (overrideTaggConf, sumEncoding opts) of
+        (False, TaggedObject _ _) -> CDRecord [modifyFieldLabel nf]
+        _ ->
+          if unwrapUnaryRecords opts
+            then CDRecordRaw $ modifyFieldLabel nf
+            else CDRecord [modifyFieldLabel nf]
     RecordConstructor _cname nf ->
       CDRecord $ NE.toList $ NE.map modifyFieldLabel nf
     SimpleConstructor _cname (f :| []) -> CDRaw f

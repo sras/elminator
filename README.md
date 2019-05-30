@@ -6,7 +6,7 @@ Generate Elm type definitions and JSON encoders/decoders from Haskell source (fo
 2. Supports generation of direct and indirect recursive types as long as the recursive types are not polymorphic.
 3. Generates code that does not depend on external Elm libraries.
 4. Does not have limits on the number of fields that the constructors of your type can have.
-5. Supports JSON encoding options exported by the Aeson library comprehensively.
+5. Supports JSON encoding options exported by the Aeson library comprehensively (The tests exhaustively check the Elm/Haskell round tripping of values for all possible configurations of Aeson.options)
 6. Supports generation of code that depend on user defined types and encoders/decoders in Elm.
 
 ### How to use?
@@ -118,6 +118,12 @@ instance (ToHType a, ToHType b) => ToHType (MyExtType a b) where
            (Just ("External", "decodeMyExtType"))
            [ha, hb])
 ```
+
+### Tests
+
+This is being tested by round tripping a bunch of JSON encoded values from an Elm front end to a Haskell back end, where it is decoded and sent back to Elm where it is again decoded and checked for equality with the value that was initially sent. This tests for this package, right now, is in the form of a quick hack Python script that makes the Haskell build walk through the possible values of Aeson.Options, generate Elm code for each, build it and tests the round tripping using a headless Chromium browser.
+
+https://bitbucket.org/sras/elminator-test/src/master/test.py
 
 ### Installing
 

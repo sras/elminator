@@ -121,9 +121,7 @@ instance (ToHType a, ToHType b) => ToHType (MyExtType a b) where
 
 ### Tests
 
-This is being tested by round tripping a bunch of JSON encoded values from an Elm front end to a Haskell back end, where it is decoded and sent back to Elm where it is again decoded and checked for equality with the value that was initially sent. This tests for this package, right now, is in the form of a quick hack Python script that makes the Haskell build walk through the possible values of Aeson.Options, generate Elm code for each, build it and tests the round tripping using a headless Chromium browser.
-
-https://bitbucket.org/sras/elminator-test/src/master/test.py
+This is being tested by round tripping a bunch of JSON encoded values from an Elm front end to a Haskell back end, where it is decoded and sent back to Elm where it is again decoded and checked for equality with the value that was initially sent. These right now, are in the form of a quick hack Python script that makes the Haskell builds and auto generated Elm source for all possible values of Aeson.Options and testing the round tripping of included types using a headless Chromium browser. The test repo is separate for now and is available at https://bitbucket.org/sras/elminator-test.
 
 ### Installing
 

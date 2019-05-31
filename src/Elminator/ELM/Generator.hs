@@ -452,7 +452,7 @@ getDecoderExpr idx td =
           TRecusrive md ->
             EFuncApp "D.lazy" $
             ELambda $ EName $ T.concat ["decode", _mTypeName md]
-          TMaybe x -> (EFuncApp "D.maybe" (getDecoderExpr idx x))
+          TMaybe x -> (EFuncApp "D.nullable" (getDecoderExpr idx x))
           TExternal (ExInfo _ _ (Just ei) _) -> EName $ T.concat [snd ei]
           TExternal ExInfo {} -> error "Decoder not found"
           TVar _ -> error "Decoder not found"

@@ -107,7 +107,7 @@ generateElm d h opts = do
 
 generateDecoder :: (TypeDescriptor, Decoder) -> GenM EDec
 generateDecoder (td, decoder) = do
-  tdisplay <- renderType td True
+  tdisplay <- renderType td True True
   case td of
     (TOccupied md _ _ _) -> fn (_mTypeName md) tdisplay
     _ -> error "Encoders/decoders can only be made for user defined types"
@@ -118,7 +118,7 @@ generateDecoder (td, decoder) = do
       pure $
         EFunc
           (T.concat ["decode", tn])
-          (Just $ T.concat ["D.Decoder", " (", tdisp, ")"])
+          (Just $ T.concat ["D.Decoder ", tdisp])
           []
           x
 
@@ -274,7 +274,7 @@ mkTupleMaker tmName idx fds =
 
 generateEncoder :: (TypeDescriptor, Decoder) -> GenM EDec
 generateEncoder (td, decoder) = do
-  tdisplay <- renderType td True
+  tdisplay <- renderType td False True
   case td of
     (TOccupied md _ _ _) -> fn (_mTypeName md) tdisplay
     _ -> error "Encoders/decoders can only be made for user defined types"
@@ -586,9 +586,8 @@ generateRecordFields fs =
   where
     mapFn :: (Text, TypeDescriptor) -> GenM ENamedField
     mapFn (a, b) = do
-      x <- renderType b False
+      x <- renderType b False False
       pure (a, x)
 
 generateUnNamedFields :: NE.NonEmpty TypeDescriptor -> GenM [Text]
-generateUnNamedFields fds =
-  mapM (\x -> wrapInPara <$> renderType x False) $ NE.toList fds
+generateUnNamedFields fds = mapM (\x -> renderType x True False) $ NE.toList fds

@@ -231,14 +231,15 @@ renderTypeHead td =
     TRecusrive md -> _mTypeName md
     x -> error ("Unimplemented" ++ show x)
 
-renderType :: TypeDescriptor -> Bool -> GenM Text
-renderType td showPhantom = do
+renderType :: TypeDescriptor -> Bool -> Bool -> GenM Text
+renderType td includePara showPhantom = do
   hp <-
     case getMd td of
       Nothing -> pure True
       Just md -> hasPoly md
   if hp
-    then case td of
+    then wrapInParaConditionally <$>
+         case td of
            TEmpty md tvars targs -> do
              ta <- zipWithM renderFn targs tvars
              pure $ T.concat [_mTypeName md, " ", T.intercalate " " ta]
@@ -246,28 +247,48 @@ renderType td showPhantom = do
              ta <- zipWithM renderFn targs tvars
              pure $ T.concat [_mTypeName md, " ", T.intercalate " " ta]
            TList wtd -> do
-             a <- renderType wtd showPhantom
-             pure $ T.concat ["(List ", a, ")"]
+             a <- renderType wtd True showPhantom
+             pure $ T.concat ["List ", a, ""]
            TMaybe wtd -> do
-             a <- renderType wtd showPhantom
-             pure $ T.concat ["(Maybe ", a, ")"]
+             a <- renderType wtd True showPhantom
+             pure $ T.concat ["Maybe ", a, ""]
            TTuple tds -> do
-             ta <- mapM (flip renderType showPhantom) tds
+             ta <- mapM (\x -> renderType x False showPhantom) tds
              pure $ T.concat ["(", T.intercalate ", " ta, ")"]
            TPrimitive md -> pure $ _mTypeName md
            TRecusrive md -> pure $ _mTypeName md
            TExternal ei -> do
-             ta <- mapM (flip renderType showPhantom) $ exTypeArgs ei
+             ta <- mapM (\x -> renderType x True showPhantom) $ exTypeArgs ei
              pure $ T.concat [snd $ exType ei, " ", T.intercalate " " ta]
            TVar name -> pure $ pack $ nameToText name
     else pure $ renderTypeHead td
   where
+    wrapInParaConditionally :: Text -> Text
+    wrapInParaConditionally tn =
+      if includePara
+        then case td of
+               TEmpty _ _ targs ->
+                 if DL.length targs > 0
+                   then wrapInPara tn
+                   else tn
+               TOccupied _ _ targs _ ->
+                 if DL.length targs > 0
+                   then wrapInPara tn
+                   else tn
+               TList _ -> wrapInPara tn
+               TMaybe _ -> wrapInPara tn
+               TExternal ei ->
+                 if DL.length (exTypeArgs ei) > 0
+                   then wrapInPara tn
+                   else tn
+               _ -> tn
+        else tn
     renderFn :: TypeDescriptor -> TypeVar -> GenM Text
     renderFn tdr (Phantom n) =
       if showPhantom
         then pure $ pack $ nameToText n
         else renderFn tdr (Used n)
-    renderFn tdr (Used _) = renderType tdr showPhantom
+    renderFn tdr (Used _) = renderType tdr True showPhantom
 
 wrapInPara :: Text -> Text
 wrapInPara i = T.concat ["(", i, ")"]

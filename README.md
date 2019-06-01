@@ -46,7 +46,7 @@ import Lib
 
 elmSource :: Text
 elmSource =
-  $(generateFor Elm0p19 myDefaultOptions (Just "./elm-app/src/Autogen.elm") $ do
+  $(generateFor Elm0p19 myDefaultOptions "Autogen" (Just "./elm-app/src/Autogen.elm") $ do
       include (Proxy :: Proxy SingleCon) $ Everything Mono
       include (Proxy :: Proxy SingleRecCon) $ Everything Mono
       include (Proxy :: Proxy SingleConOneField) $ Everything Mono
@@ -81,7 +81,7 @@ elmSource =
       include (Proxy :: Proxy PhantomWrapper) $ Everything Poly)
 
 -- The `generateFor` function accepts an elm version (Elm0p19 or Elm0p18), a value of type `Options` from the Aeson library
--- , and optional `FilePath` to which the generated source will be written to, and a `Builder` value.
+-- , a module name for the generated module, and an optional `FilePath` to which the generated source will be written to, and a `Builder` value.
 -- The `Builder` is just a `State` monad that aggregates the configuration parameters from the include
 -- calls. The first parameter of the include function is a `proxy` value that denotes the type that requires Elm code generation.
 -- The second value is a value of type `GenOption` that selects which entities needs to be generation, and also selects if the
@@ -98,26 +98,70 @@ data PolyConfig
 
 A sample of generated Elm code can be seen [here](https://bitbucket.org/sras/elminator-test/src/master/elm-app/src/Autogen.elm)
 
-### How to depend on predefined types and encoders/decoders
+### How to explicitly map a Haskell type to an Elm type
 
-This is intended to be an escape hatch in cases where the types you want to generate elm code for, in turn contains types that you didn't define, and do not have access to the internals of.
-This feature basically allows you to define the Elm type and encoders/decoders yourself, and let the generated code import it and use them in the generated code. 
+Say you have this type defined in Haskell
 
-To use this, derive the `ToHType` instance for the type using the `HExternal` constructor of the `HType` type. Sample code can be seen below, where we define a `ToHType` instance for a type called `MyExtType`.
-
-```haskell
-instance (ToHType a, ToHType b) => ToHType (MyExtType a b) where
-  toHType _ = do
-    ha <- toHType (Proxy :: Proxy a)
-    hb <- toHType (Proxy :: Proxy b)
-    pure $
-      HExternal
-        (ExInfo
-           ("External", "MyExtType")
-           (Just ("External", "encodeMyExtType"))
-           (Just ("External", "decodeMyExtType"))
-           [ha, hb])
 ```
+  data Product = Product { pName :: String, pWeight :: Decimal }
+```
+
+We can derive `ToHType` for the above type just fine. This is because we have this general ToHType instance that use the `Typeable` instances to create primitive type representation.
+
+```
+instance {-# OVERLAPPABLE #-} (Typeable a) => ToHType a where
+  toHType p = pure $ mkHType p
+```
+
+Even though we are able to derive HType instance, the generated code end up looking something like the following
+
+```
+type Product = Product { pName : String, pWeight : DecimalRaw } 
+
+encodeProduct : Product  -> E.Value
+encodeProduct a = 
+ case a of
+  Product x -> E.object ([ ("pName", E.string (x.pName))
+                         , ("pWeight", encodeDecimalRaw (x.pWeight))])
+
+decodeProduct : D.Decoder Product 
+decodeProduct  = 
+ D.oneOf ([ let
+             mkProduct a1 a2 = 
+              Product ({pName = a1, pWeight = a2})
+            in D.map2 (mkProduct) (D.field ("pName") (D.string)) (D.field ("pWeight") (encodeDecimalRaw))])
+```
+
+But there is no `DecimalRaw` type on the Elm side. So in this case, we might want to use `Float` on Elm side whenever we have a `Decimal` field in Haskell.
+
+This can be done as follows
+
+```
+  instance ToHType Decimal where
+    toHType _ = toHType (Proxy :: Proxy Float)
+```
+
+This gives us usable Elm code.
+
+```
+type Product = Product { pName : String, pWeight : Float } 
+
+encodeProduct : Product  -> E.Value
+encodeProduct a = 
+ case a of
+  Product x -> E.object ([ ("pName", E.string (x.pName))
+                         , ("pWeight", E.float (x.pWeight))])
+
+decodeProduct : D.Decoder Product 
+decodeProduct  = 
+ D.oneOf ([ let
+             mkProduct a1 a2 = 
+              Product ({pName = a1, pWeight = a2})
+            in D.map2 (mkProduct) (D.field ("pName") (D.string)) (D.field ("pWeight") (D.float))])
+```
+
+Note that this only works if both types have compatible JSON representations. The Aeson instances
+should take care of this on the Haskell side.
 
 ### Tests
 

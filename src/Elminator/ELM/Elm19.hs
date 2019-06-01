@@ -5,11 +5,13 @@ module Elminator.ELM.Elm19 where
 import Data.Text as T
 import Elminator.ELM.Render
 
-elmFront :: Text -> Text
-elmFront imports =
+elmFront :: Text -> Text -> Text
+elmFront moduleName imports =
   T.concat
     [ "\
-  \module Autogen exposing (..)\n\
+  \module "
+    , moduleName
+    , " exposing (..)\n\
   \\n"
     , imports
     , "\n\n"

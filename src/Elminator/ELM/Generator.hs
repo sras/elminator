@@ -22,19 +22,19 @@ import Language.Haskell.TH
 import Prelude
 import qualified Prelude as P
 
-elmFront :: GenM (Text -> Text)
-elmFront = do
+elmFront :: Text -> GenM (Text -> Text)
+elmFront moduleName = do
   (ev, _) <- ask
   case ev of
-    Elm0p19 -> pure $ Elm19.elmFront
-    Elm0p18 -> pure $ Elm18.elmFront
+    Elm0p19 -> pure $ Elm19.elmFront moduleName
+    Elm0p18 -> pure $ Elm18.elmFront moduleName
 
 listEncoder :: GenM EExpr
 listEncoder = do
   (ev, _) <- ask
   case ev of
-    Elm0p19 -> pure $ Elm19.listEncoder
-    Elm0p18 -> pure $ Elm18.listEncoder
+    Elm0p19 -> pure Elm19.listEncoder
+    Elm0p18 -> pure Elm18.listEncoder
 
 generateTupleEncoder :: Int -> [TypeDescriptor] -> GenM EDec
 generateTupleEncoder idx types = do
@@ -54,11 +54,11 @@ generateTupleEncoder idx types = do
       expr <-
         zipWithM
           (\x i -> do
-             expr <- (getEncoderExpr (idx + 1) x)
+             expr <- getEncoderExpr (idx + 1) x
              pure $ EFuncApp expr (EName $ indexVar i))
           types
           [1 ..]
-      pure $ (EFuncApp (EFuncApp le "identity") $ EList expr)
+      pure (EFuncApp (EFuncApp le "identity") $ EList expr)
 
 generateTupleDecoder :: Int -> [TypeDescriptor] -> EDec
 generateTupleDecoder nidx types =
@@ -315,9 +315,8 @@ decoderToEncoderEExpr d =
       le <- listEncoder
       pure
         ( makePattern a
-        , (EFuncApp (EFuncApp le "identity") $
-           EList
-             [EFuncApp "E.string" $ ELiteral $ EStringL $ unpack ctag, exprs]))
+        , EFuncApp (EFuncApp le "identity") $
+          EList [EFuncApp "E.string" $ ELiteral $ EStringL $ unpack ctag, exprs])
     mapFn2 ::
          Text -> Text -> (ConName, ConTag, ContentDecoder) -> GenM ECaseBranch
     mapFn2 tfn cfn a = do

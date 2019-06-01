@@ -268,17 +268,17 @@ renderType td includePara showPhantom = do
       if includePara
         then case td of
                TEmpty _ _ targs ->
-                 if DL.length targs > 0
+                 if not (DL.null targs)
                    then wrapInPara tn
                    else tn
                TOccupied _ _ targs _ ->
-                 if DL.length targs > 0
+                 if not (DL.null targs)
                    then wrapInPara tn
                    else tn
                TList _ -> wrapInPara tn
                TMaybe _ -> wrapInPara tn
                TExternal ei ->
-                 if DL.length (exTypeArgs ei) > 0
+                 if not $ DL.null (exTypeArgs ei)
                    then wrapInPara tn
                    else tn
                _ -> tn

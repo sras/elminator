@@ -48,12 +48,18 @@ include p dc = do
 -- | Return the generated Elm code in a template haskell splice and optionally
 -- write to a Elm source file at the same time. The second argument is the Options type
 -- from Aeson library. Use `include` calls to build the `Builder` value.
-generateFor :: ElmVersion -> Options -> Maybe FilePath -> Builder -> Q Exp
-generateFor ev opt mfp sc =
+generateFor ::
+     ElmVersion -- ^ The target Elm version
+  -> Options -- ^ The Aeson.Options
+  -> Text -- ^ The name of the target module
+  -> Maybe FilePath -- ^ Optional filepath to write the generated source to
+  -> Builder -- ^ Configuration made by calls to `include` function.
+  -> Q Exp
+generateFor ev opt moduleName mfp sc =
   let (_, gc) = runState sc DMS.empty
       r = do
         srcs <- mapM generateOne $ DMS.elems gc
-        front <- Elm.elmFront
+        front <- Elm.elmFront moduleName
         pure (front, T.intercalate "" srcs)
    in do ((front, exprtxt), exinfo) <- runReaderT (runWriterT r) (ev, gc)
          let fSrc = T.concat [front $ toImport exinfo, "\n\n", exprtxt]

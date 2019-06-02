@@ -1,0 +1,22 @@
+language: minimal
+dist: xenial
+cache:
+  directories:
+  - $HOME/.stack
+before_script: 
+  - sudo apt-get install chromium-browser
+  - sudo apt-get install wget
+  - wget -qO- https://get.haskellstack.org/ | sh
+  - git clone https://bitbucket.org/sras/elminator-test /home/travis/build/sras/elminator-test
+  - sudo apt-get install python3-pip
+  - pip3 install rcrepl
+  - cd /home/travis/build/sras/elminator-test && stack build
+  - echo ":set prompt RCGHCIPROMPT>>>" > /home/travis/.ghci
+  - chmod go-w /home/travis/.ghci
+  - (export RCGHCI_PROMPT='RCGHCIPROMPT>>>' && export RCREPL_PORT=1880 && rcghci - --ghci-options "+RTS -M2G -RTS" &)
+  - sudo ln -s `which chromium-browser` /usr/bin/chromium
+  - wget https://github.com/elm/compiler/releases/download/0.19.0/binaries-for-linux.tar.gz && tar -xf binaries-for-linux.tar.gz && sudo mv elm /usr/bin
+script: cd /home/travis/build/sras/elminator-test && python3 test.py
+addons:
+  apt:
+    update: true

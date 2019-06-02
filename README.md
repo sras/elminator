@@ -1,4 +1,4 @@
-# Elminator
+# Elminator [![Build Status](https://travis-ci.com/sras/elminator.svg?branch=master)](https://travis-ci.com/sras/elminator)
 
 Generate Elm type definitions and JSON encoders/decoders from Haskell source (for Elm 0.19 and 0.18)
 
@@ -8,6 +8,8 @@ Generate Elm type definitions and JSON encoders/decoders from Haskell source (fo
 4. Does not have limits on the number of fields that the constructors of your type can have.
 5. Supports JSON encoding options exported by the Aeson library comprehensively (The tests exhaustively check the Elm/Haskell round tripping of values for all possible configurations of Aeson.options)
 6. Supports generation of code that depend on user defined types and encoders/decoders in Elm.
+
+Hackage page: [https://hackage.haskell.org/package/elminator](https://hackage.haskell.org/package/elminator)
 
 ### How to use?
 

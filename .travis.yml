@@ -9,7 +9,7 @@ before_script:
   - wget -qO- https://get.haskellstack.org/ | sh
   - git clone https://bitbucket.org/sras/elminator-test /home/travis/build/sras/elminator-test
   - sudo apt-get install python3-pip
-  - pip3 install rcrepl
+  - pip3 install rcrepl websocket-client
   - cd /home/travis/build/sras/elminator-test && stack build
   - echo ":set prompt RCGHCIPROMPT>>>" > /home/travis/.ghci
   - chmod go-w /home/travis/.ghci

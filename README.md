@@ -6,7 +6,7 @@ Generate Elm type definitions and JSON encoders/decoders from Haskell source (fo
 2. Supports generation of recursively defined types.
 3. Generates code that does not depend on external Elm libraries.
 4. Does not have limits on the number of fields that the constructors of your type can have.
-5. Supports JSON encoding options exported by the Aeson library comprehensively (The tests exhaustively check the Elm/Haskell round tripping of values for all possible configurations of Aeson.options)
+5. Supports JSON encoding options exported by the Aeson library comprehensively. The tests in [TravisCI](https://travis-ci.com/sras/elminator) exhaustively check the Elm/Haskell round tripping of values for all possible configurations of Aeson.options
 6. Supports generation of code that depend on user defined types and encoders/decoders in Elm.
 
 Hackage page: [https://hackage.haskell.org/package/elminator](https://hackage.haskell.org/package/elminator)
@@ -167,7 +167,7 @@ should take care of this on the Haskell side.
 
 ### Tests
 
-This is being tested by round tripping a bunch of JSON encoded values from an Elm front end to a Haskell back end, where it is decoded and sent back to Elm where it is again decoded and checked for equality with the value that was initially sent. These right now, are in the form of a quick hack Python script that makes the Haskell builds and auto generated Elm source for all possible values of Aeson.Options and testing the round tripping of included types using a headless Chromium browser. The test repo is separate for now and is available at https://bitbucket.org/sras/elminator-test.
+This is being tested by round tripping a bunch of JSON encoded values from an Elm front end to a Haskell back end, where it is decoded and sent back to Elm where it is again decoded and checked for equality with the value that was initially sent. These right now, are in the form of a Python script that walks through the full range of Aeson options, make the Haskell build and auto generated Elm source for each, and then test the round tripping of included types using a headless Chromium browser. The tests at [TravisCI](https://travis-ci.com/sras/elminator) use this process as well. The test repo is separate for now and is available at https://bitbucket.org/sras/elminator-test.
 
 ### Installing
 

@@ -101,7 +101,7 @@ data ReifyInfo =
 -- | Except for the reified info from TH, this type
 -- holds more or less same info as HType
 -- but it is arranged in a bit more accessable way for the
--- code that uses this information. 
+-- code that uses this information.
 data TypeDescriptor
   = TEmpty MData [TypeVar] [TypeDescriptor]
   | TOccupied MData ReifyInfo [TypeDescriptor] Constructors
@@ -216,9 +216,9 @@ getTypeArgs i =
     TyConI (NewtypeD _ _ args _ _ _) -> mapFn <$> args
     _ -> error "Unimplemented"
   where
-    mapFn :: TyVarBndr -> Name
-    mapFn (PlainTV n) = n
-    mapFn (KindedTV n _) = n
+    mapFn :: TyVarBndr f -> Name
+    mapFn (PlainTV n _) = n
+    mapFn (KindedTV n _ _) = n
 
 nameToText :: Name -> String
 nameToText (Name (OccName a) _) = a

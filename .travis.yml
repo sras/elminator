@@ -3,7 +3,7 @@ dist: xenial
 cache:
   directories:
   - $HOME/.stack
-before_script: 
+before_script:
   - sudo apt-get install chromium-browser
   - sudo apt-get install wget
   - wget -qO- https://get.haskellstack.org/ | sh
@@ -15,7 +15,7 @@ before_script:
   - chmod go-w /home/travis/.ghci
   - (export RCGHCI_PROMPT='RCGHCIPROMPT>>>' && export RCREPL_PORT=1880 && rcghci - --ghci-options "+RTS -M2G -RTS" &)
   - sudo ln -s `which chromium-browser` /usr/bin/chromium
-  - wget https://github.com/elm/compiler/releases/download/0.19.0/binaries-for-linux.tar.gz && tar -xf binaries-for-linux.tar.gz && sudo mv elm /usr/bin
+  - wget https://github.com/elm/compiler/releases/download/0.19.1/binary-for-linux-64-bit.gz && gunzip binary-for-linux-64-bit.gz && sudo mv binary-for-linux-64-bit /usr/bin/elm
 script: cd /home/travis/build/sras/elminator-test && python3 test.py
 addons:
   apt:

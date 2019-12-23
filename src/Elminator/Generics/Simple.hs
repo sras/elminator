@@ -16,12 +16,13 @@ import qualified Data.List as DL
 import qualified Data.Map.Strict as DMS
 import Data.Proxy
 import Data.String
+import Data.Kind
 import Data.Text (Text, pack)
 import qualified Data.Text as T
 import Data.Typeable
 import GHC.Generics
 import GHC.TypeLits
-import Language.Haskell.TH
+import Language.Haskell.TH hiding (Type)
 
 newtype CName =
   CName Text
@@ -115,17 +116,17 @@ data HType
   | HExternal (ExInfo HType)
   deriving (Show)
 
-class ToHType_ (f :: * -> *) where
+class ToHType_ (f :: Type -> Type) where
   toHType_ :: Proxy f -> HState HType
 
-class ToHField_ (f :: * -> *) where
+class ToHField_ (f :: Type -> Type) where
   toHField_ :: Proxy f -> HState [HField]
 
-class ToHConstructor_ (f :: * -> *) where
+class ToHConstructor_ (f :: Type -> Type) where
   toHConstructor_ :: Proxy f -> HState [HConstructor]
 
-type family ExtractTArgs (f :: k) :: [*] where
-  ExtractTArgs ((b :: * -> k) a) = a : ExtractTArgs b
+type family ExtractTArgs (f :: k) :: [Type] where
+  ExtractTArgs ((b :: Type -> k) a) = a : ExtractTArgs b
   ExtractTArgs f = '[]
 
 class ToHTArgs f where

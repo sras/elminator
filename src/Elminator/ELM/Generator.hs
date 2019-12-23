@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# OPTIONS_GHC  -Wno-incomplete-uni-patterns #-}
 
 module Elminator.ELM.Generator
   ( generateElm

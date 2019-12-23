@@ -26,7 +26,6 @@ import qualified Elminator.ELM.Generator as Elm
 import Elminator.Generics.Simple
 import Elminator.Lib
 import Language.Haskell.TH
-import System.IO (FilePath)
 
 -- | Include the elm source for the Haskell type specified by the proxy argument.
 -- The second argument decides which components will be included and if the

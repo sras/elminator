@@ -22,6 +22,7 @@ import Elminator.Lib
 import Language.Haskell.TH
 import Prelude
 import qualified Prelude as P
+import Control.Monad (zipWithM)
 
 elmFront :: Text -> GenM (Text -> Text)
 elmFront moduleName = do
@@ -485,7 +486,7 @@ getPrimitiveDecoder "String" = "D.string"
 getPrimitiveDecoder "Int" = "D.int"
 getPrimitiveDecoder "Float" = "D.float"
 getPrimitiveDecoder "Bool" = "D.bool"
-getPrimitiveDecoder s = T.concat ["encode", s]
+getPrimitiveDecoder s = T.concat ["decode", s]
 
 getPrimitiveEncoder :: Text -> Text
 getPrimitiveEncoder "String" = "E.string"

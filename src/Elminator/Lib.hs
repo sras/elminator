@@ -39,6 +39,7 @@ import Data.Text as T hiding (foldr)
 import Elminator.Generics.Simple
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax
+import Control.Monad (zipWithM)
 
 data ContentDecoder
   = CDRecord [(FieldName, FieldTag, TypeDescriptor)]
@@ -216,7 +217,7 @@ getTypeArgs i =
     TyConI (NewtypeD _ _ args _ _ _) -> mapFn <$> args
     _ -> error "Unimplemented"
   where
-    mapFn :: TyVarBndr f -> Name
+    mapFn :: TyVarBndr b -> Name
     mapFn (PlainTV n _) = n
     mapFn (KindedTV n _ _) = n
 

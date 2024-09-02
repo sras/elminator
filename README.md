@@ -29,7 +29,7 @@ data SingleCon = SingleCon Int String deriving (Generic, ToHType)
 
 ```
 
-Since this library uses template Haskell to look up type information (in addition to Generics), we need to run the code generation code in a template Haskell splice. 
+Since this library uses template Haskell to look up type information (in addition to Generics), we need to run the code generation code in a template Haskell splice.
 A usage sample can be seen in the following code used in the round trip tests for this library.
 
 
@@ -95,7 +95,7 @@ data GenOption
   | Everything PolyConfig -- Generate both type definition, encoders and decoders. PolyConfig field decides if the type has to be polymorphic.
 
 data PolyConfig
-  = Mono | Poly 
+  = Mono | Poly
 ```
 
 A sample of generated Elm code can be seen [here](https://bitbucket.org/sras/elminator-test/src/master/elm-app/src/Autogen.elm)
@@ -118,18 +118,18 @@ instance {-# OVERLAPPABLE #-} (Typeable a) => ToHType a where
 Even though we are able to derive HType instance, the generated code end up looking something like the following
 
 ```
-type Product = Product { pName : String, pWeight : DecimalRaw } 
+type Product = Product { pName : String, pWeight : DecimalRaw }
 
 encodeProduct : Product  -> E.Value
-encodeProduct a = 
+encodeProduct a =
  case a of
   Product x -> E.object ([ ("pName", E.string (x.pName))
                          , ("pWeight", encodeDecimalRaw (x.pWeight))])
 
-decodeProduct : D.Decoder Product 
-decodeProduct  = 
+decodeProduct : D.Decoder Product
+decodeProduct  =
  D.oneOf ([ let
-             mkProduct a1 a2 = 
+             mkProduct a1 a2 =
               Product ({pName = a1, pWeight = a2})
             in D.map2 (mkProduct) (D.field ("pName") (D.string)) (D.field ("pWeight") (encodeDecimalRaw))])
 ```
@@ -146,20 +146,20 @@ This can be done as follows
 This gives us usable Elm code.
 
 ```
-type Product = Product { pName : String, pWeight : Float } 
+type Product = Product { pName : String, pWeight : DecimalRaw }
 
-encodeProduct : Product  -> E.Value
-encodeProduct a = 
+encodeProduct : Product -> E.Value
+encodeProduct a =
  case a of
   Product x -> E.object ([ ("pName", E.string (x.pName))
-                         , ("pWeight", E.float (x.pWeight))])
+                         , ("pWeight", encodeDecimalRaw (x.pWeight))])
 
-decodeProduct : D.Decoder Product 
-decodeProduct  = 
+decodeProduct : D.Decoder Product
+decodeProduct  =
  D.oneOf ([ let
-             mkProduct a1 a2 = 
+             mkProduct a1 a2 =
               Product ({pName = a1, pWeight = a2})
-            in D.map2 (mkProduct) (D.field ("pName") (D.string)) (D.field ("pWeight") (D.float))])
+            in D.map2 (mkProduct) (D.field ("pName") (D.string)) (D.field ("pWeight") (decodeDecimalRaw))])
 ```
 
 Note that this only works if both types have compatible JSON representations. The Aeson instances

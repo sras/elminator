@@ -1,5 +1,5 @@
 name:                elminator
-version:             0.2.4.1
+version:             0.2.4.4
 git:                 "https://github.com/sras/elminator.git"
 license:             BSD3
 author:              "Sandeep.C.R"
@@ -17,12 +17,12 @@ ghc-options: -Wall
 description:         Please see the README on GitHub at <https://github.com/sras/elminator#readme>
 
 dependencies:
-- base >= 4.7 && < 5
-- template-haskell
-- containers
-- text
-- mtl
-- aeson
+  - base >=4.7 && <5
+  - aeson >= 2.2.3 && < 2.3
+  - template-haskell >= 2.22.0 && < 2.23
+  - containers >= 0.7 && < 0.8
+  - mtl >= 2.3.1 && < 2.4
+  - text >= 2.1.1 && < 2.2
 
 library:
   source-dirs: src
